@@ -4,13 +4,8 @@
 
 export type ToolType = 'brush' | 'eraser' | 'marker' | 'text' | 'sticker';
 
-export type VibeType =
-  | 'Cute Handwritten'
-  | 'Default Modern'
-  | 'Pastel Aesthetic'
-  | 'Dark Mode Neon'
-  | 'Retro 90s Web'
-  | 'Minimal Editorial';
+/** @deprecated Website theming feature has been removed */
+export type VibeType = string;
 
 export interface CanvasTextNote {
   id: string;
@@ -22,6 +17,8 @@ export interface CanvasTextNote {
   fontFamily: 'Caveat' | 'system-ui';
 }
 
+export type StickerTrayTab = 'gifs' | 'stickers';
+
 export interface CanvasSticker {
   id: string;
   url: string;
@@ -30,6 +27,8 @@ export interface CanvasSticker {
   width: number;
   height: number;
   rotation: number;
+  kind?: 'photo' | 'gif' | 'sticker' | 'washi';
+  label?: string;
 }
 
 export interface DrawingPoint {
@@ -48,8 +47,8 @@ export interface DrawingStroke {
 
 export interface GenerateResult {
   html: string;
-  vibe: string;
   model: string;
+  vibe?: string;
 }
 
 export interface PublishResult {
@@ -68,5 +67,4 @@ export interface AuthState {
     displayName: string | null;
   } | null;
   idToken: string | null;
-  isMockMode: boolean;
 }

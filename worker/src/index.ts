@@ -75,8 +75,17 @@ export function isValidImageUrl(url: string, env: Env): boolean {
     const hostname = parsed.hostname.toLowerCase();
     const pathname = parsed.pathname;
 
-    // Supported aesthetic photo presets (used in Doodlebug PWA tray)
-    if (hostname === 'images.unsplash.com') {
+    // Supported aesthetic photo & GIF CDNs (Unsplash, Tenor, Giphy used in Doodlebug PWA tray)
+    if (
+      hostname === 'images.unsplash.com' ||
+      hostname === 'media.tenor.com' ||
+      hostname === 'media1.tenor.com' ||
+      hostname === 'c.tenor.com' ||
+      hostname.endsWith('.tenor.com') ||
+      hostname === 'media.giphy.com' ||
+      hostname === 'i.giphy.com' ||
+      hostname.endsWith('.giphy.com')
+    ) {
       return true;
     }
 
@@ -352,10 +361,6 @@ export default {
 
       if (body.notes && typeof body.notes === 'string' && body.notes.length > 4000) {
         return jsonResponse({ error: 'Notes exceed maximum length of 4000 characters' }, 400, env, {}, origin);
-      }
-
-      if (body.vibe && typeof body.vibe === 'string' && body.vibe.length > 100) {
-        return jsonResponse({ error: 'Vibe exceeds maximum length of 100 characters' }, 400, env, {}, origin);
       }
 
       try {

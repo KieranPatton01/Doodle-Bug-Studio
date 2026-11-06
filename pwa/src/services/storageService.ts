@@ -34,7 +34,7 @@ export async function uploadPhotoToFirebase(
   const storage = getFirebaseStorage();
 
   if (!storage || !storage.app) {
-    throw new Error('Firebase Storage is not configured. Please configure Firebase in Settings or select a sample photo from the tray.');
+    throw new Error('Firebase Storage is not configured. Please check your Firebase environment configuration or choose a GIF/sticker from the tray.');
   }
 
   // 1. Pre-flight metadata validation against storage.rules constraints

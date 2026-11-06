@@ -152,6 +152,22 @@ async function runTestSuite() {
     assert.match(appContent, /handleDeleteSticker = React\.useCallback/);
   });
 
+  const headerContent = fs.readFileSync(path.join(pwaDir, 'src', 'components', 'Header.tsx'), 'utf8');
+
+  await test('Theming feature is removed from Header and App UI', () => {
+    assert.strictEqual(headerContent.includes('onOpenVibeSelector'), false, 'Header must not have onOpenVibeSelector');
+    assert.strictEqual(headerContent.includes('currentVibe'), false, 'Header must not have currentVibe');
+    assert.strictEqual(appContent.includes('<VibeSelector'), false, 'App must not render VibeSelector');
+  });
+
+  const previewModalContent = fs.readFileSync(path.join(pwaDir, 'src', 'components', 'PreviewModal.tsx'), 'utf8');
+
+  await test('Canvas and PreviewModal enforce mobile-first viewport constraints', () => {
+    assert.match(appContent, /max-w-\[430px\]/, 'App must constrain canvas container to mobile-first phone width');
+    assert.match(previewModalContent, /max-w-\[390px\]/, 'PreviewModal must render iframe in mobile-first frame');
+    assert.strictEqual(previewModalContent.includes('setViewport'), false, 'PreviewModal must not provide desktop/tablet viewport switchers');
+  });
+
   // 6. Photo Upload Pre-Flight Validation & On-Device Optimization Contracts
   console.log('\n--- 6. Photo Upload Pre-Flight Validation & On-Device Optimization Contracts ---');
 
@@ -186,6 +202,7 @@ async function runTestSuite() {
     inferMimeType,
     calculateTargetDimensions,
     optimizeImageForUpload,
+    generateAnonymizedFileName,
     ALLOWED_IMAGE_TYPES,
     MAX_STORAGE_FILE_SIZE,
   } = imageOptimizer;
@@ -354,7 +371,7 @@ async function runTestSuite() {
     assert.strictEqual(zero.height, 1);
   });
 
-  await test('optimizeImageForUpload guarantees returned File has valid raster MIME type matching storage.rules', async () => {
+  await test('optimizeImageForUpload guarantees returned File has valid raster MIME type matching storage.rules and anonymizes filenames', async () => {
     // Input file with empty MIME type (common on mobile)
     const jpegBytes = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
     const fileWithEmptyType = new File([jpegBytes], 'mobile_photo.jpg', { type: '' });
@@ -362,12 +379,239 @@ async function runTestSuite() {
     const optimized = await optimizeImageForUpload(fileWithEmptyType);
     assert.ok(optimized instanceof File);
     assert.strictEqual(optimized.type, 'image/jpeg', 'Returned File must have normalized image/jpeg type, never empty');
+    assert.notStrictEqual(optimized.name, 'mobile_photo.jpg', 'Returned filename must be anonymized');
+    assert.match(optimized.name, /^photo_\d+_[a-z0-9]+\.jpg$/, 'Returned filename must follow photo_<timestamp>_<token>.jpg pattern');
 
-    // Animated GIF under 5MB preserves GIF type
+    // Animated GIF under 5MB preserves GIF type and anonymizes filename
     const gifBytes = new Uint8Array(Buffer.from('GIF89a\x01\x00\x01\x00'));
     const gifFile = new File([gifBytes], 'sticker.gif', { type: '' });
     const optimizedGif = await optimizeImageForUpload(gifFile);
     assert.strictEqual(optimizedGif.type, 'image/gif', 'Returned GIF must have valid image/gif type');
+    assert.notStrictEqual(optimizedGif.name, 'sticker.gif', 'GIF filename must be anonymized');
+    assert.match(optimizedGif.name, /^photo_\d+_[a-z0-9]+\.gif$/, 'GIF filename must follow photo_<timestamp>_<token>.gif pattern');
+  });
+
+  await test('generateAnonymizedFileName produces randomized collision-resistant filenames for all raster formats', () => {
+    const jpegName = generateAnonymizedFileName('image/jpeg');
+    assert.match(jpegName, /^photo_\d+_[a-z0-9]{6}\.jpg$/);
+
+    const pngName = generateAnonymizedFileName('image/png');
+    assert.match(pngName, /^photo_\d+_[a-z0-9]{6}\.png$/);
+
+    const webpName = generateAnonymizedFileName('image/webp');
+    assert.match(webpName, /^photo_\d+_[a-z0-9]{6}\.webp$/);
+
+    const gifName = generateAnonymizedFileName('image/gif');
+    assert.match(gifName, /^photo_\d+_[a-z0-9]{6}\.gif$/);
+
+    // Two consecutive calls produce unique names
+    const name1 = generateAnonymizedFileName('image/jpeg');
+    const name2 = generateAnonymizedFileName('image/jpeg');
+    assert.notStrictEqual(name1, name2);
+
+    // Normalizes MIME parameters and uppercase
+    assert.match(generateAnonymizedFileName('image/webp; codecs=vp8'), /^photo_\d+_[a-z0-9]{6}\.webp$/);
+    assert.match(generateAnonymizedFileName('IMAGE/PNG'), /^photo_\d+_[a-z0-9]{6}\.png$/);
+    assert.match(generateAnonymizedFileName('image/jpeg; charset=binary'), /^photo_\d+_[a-z0-9]{6}\.jpg$/);
+  });
+
+  await test('optimizeImageForUpload re-encodes photos via canvas, strips EXIF metadata, preserves WebP alpha, cleans GPU memory, and anonymizes filenames', async () => {
+    const origWindow = global.window;
+    const origDocument = global.document;
+    const origImage = global.Image;
+    const origCreateObjectURL = URL.createObjectURL;
+    const origRevokeObjectURL = URL.revokeObjectURL;
+
+    let drawImageCalled = false;
+    let exportMimeRequested = '';
+    let canvasInstance = null;
+
+    try {
+      URL.createObjectURL = () => 'blob:mock-url';
+      URL.revokeObjectURL = () => {};
+
+      global.window = {};
+      global.Image = class {
+        constructor() {
+          this.naturalWidth = 2000;
+          this.naturalHeight = 1500;
+          this.width = 2000;
+          this.height = 1500;
+          setTimeout(() => {
+            if (this.onload) this.onload();
+          }, 0);
+        }
+      };
+
+      global.document = {
+        createElement: (tag) => {
+          if (tag === 'canvas') {
+            const canvas = {
+              width: 0,
+              height: 0,
+              getContext: () => ({
+                imageSmoothingEnabled: true,
+                imageSmoothingQuality: 'high',
+                drawImage: () => {
+                  drawImageCalled = true;
+                },
+              }),
+              toBlob: (cb, mime, q) => {
+                exportMimeRequested = mime;
+                const blob = new Blob([new Uint8Array([0x52, 0x49, 0x46, 0x46])], { type: mime });
+                cb(blob);
+              },
+            };
+            canvasInstance = canvas;
+            return canvas;
+          }
+          return {};
+        },
+      };
+
+      // 1. WebP photo re-encoding: preserves image/webp MIME type and anonymizes filename
+      const webpBytes = new Uint8Array(Buffer.concat([Buffer.from('RIFF'), Buffer.from([0, 0, 0, 0]), Buffer.from('WEBP')]));
+      const webpFile = new File([webpBytes], 'Personal_Family_Vacation_With_GPS.webp', { type: 'image/webp' });
+
+      const optimizedWebp = await optimizeImageForUpload(webpFile);
+
+      assert.strictEqual(drawImageCalled, true, 'Canvas 2D context drawImage must be called to re-encode photo and strip EXIF');
+      assert.strictEqual(exportMimeRequested, 'image/webp', 'Must preserve image/webp MIME type to keep alpha transparency');
+      assert.strictEqual(optimizedWebp.type, 'image/webp');
+      assert.notStrictEqual(optimizedWebp.name, 'Personal_Family_Vacation_With_GPS.webp', 'Filename must not contain user original name');
+      assert.match(optimizedWebp.name, /^photo_\d+_[a-z0-9]+\.webp$/, 'Filename must match photo_<timestamp>_<token>.webp');
+      assert.strictEqual(canvasInstance.width, 0, 'Canvas width must be reset to 0 to free GPU memory');
+      assert.strictEqual(canvasInstance.height, 0, 'Canvas height must be reset to 0 to free GPU memory');
+
+      // 2. JPEG photo re-encoding: re-encodes, anonymizes filename, and cleans up memory
+      drawImageCalled = false;
+      const jpegBytes = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
+      const jpegFile = new File([jpegBytes], 'Secret_Passport_Scan.jpg', { type: 'image/jpeg' });
+
+      const optimizedJpeg = await optimizeImageForUpload(jpegFile);
+      assert.strictEqual(drawImageCalled, true, 'Must re-encode JPEG photo through canvas');
+      assert.strictEqual(exportMimeRequested, 'image/jpeg');
+      assert.strictEqual(optimizedJpeg.type, 'image/jpeg');
+      assert.notStrictEqual(optimizedJpeg.name, 'Secret_Passport_Scan.jpg');
+      assert.match(optimizedJpeg.name, /^photo_\d+_[a-z0-9]+\.jpg$/);
+      assert.strictEqual(canvasInstance.width, 0, 'Canvas width must be reset to 0 after JPEG encoding');
+      assert.strictEqual(canvasInstance.height, 0, 'Canvas height must be reset to 0 after JPEG encoding');
+
+      // 3. WebP fallback handling: if browser toBlob does not support image/webp (returns null), fallback to PNG to preserve transparency
+      drawImageCalled = false;
+      global.document.createElement = (tag) => {
+        if (tag === 'canvas') {
+          const canvas = {
+            width: 0,
+            height: 0,
+            getContext: () => ({
+              imageSmoothingEnabled: true,
+              imageSmoothingQuality: 'high',
+              drawImage: () => {
+                drawImageCalled = true;
+              },
+            }),
+            toBlob: (cb, mime, q) => {
+              if (mime === 'image/webp') {
+                // Unsupported in this browser: toBlob returns null
+                cb(null);
+              } else {
+                cb(new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], { type: mime }));
+              }
+            },
+          };
+          canvasInstance = canvas;
+          return canvas;
+        }
+        return {};
+      };
+
+      const fallbackWebp = await optimizeImageForUpload(webpFile);
+      assert.strictEqual(fallbackWebp.type, 'image/png', 'Must fall back to PNG to preserve alpha transparency when WebP is unsupported');
+      assert.match(fallbackWebp.name, /^photo_\d+_[a-z0-9]+\.png$/);
+      assert.strictEqual(canvasInstance.width, 0, 'Canvas width must be reset to 0 even after WebP fallback');
+      assert.strictEqual(canvasInstance.height, 0, 'Canvas height must be reset to 0 even after WebP fallback');
+
+      // 4. WebP standard canvas fallback: browser canvas toBlob returns image/png Blob for unsupported webp
+      drawImageCalled = false;
+      global.document.createElement = (tag) => {
+        if (tag === 'canvas') {
+          const canvas = {
+            width: 0,
+            height: 0,
+            getContext: () => ({
+              imageSmoothingEnabled: true,
+              imageSmoothingQuality: 'high',
+              drawImage: () => {
+                drawImageCalled = true;
+              },
+            }),
+            toBlob: (cb, mime, q) => {
+              if (mime === 'image/webp') {
+                // Per W3C spec: unsupported format returns image/png Blob
+                cb(new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], { type: 'image/png' }));
+              } else {
+                cb(new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], { type: mime }));
+              }
+            },
+          };
+          canvasInstance = canvas;
+          return canvas;
+        }
+        return {};
+      };
+
+      const specFallbackWebp = await optimizeImageForUpload(webpFile);
+      assert.strictEqual(specFallbackWebp.type, 'image/png', 'Must adopt image/png type when canvas returns PNG for unsupported WebP');
+      assert.match(specFallbackWebp.name, /^photo_\d+_[a-z0-9]+\.png$/);
+      assert.strictEqual(canvasInstance.width, 0, 'Canvas width must be reset to 0');
+      assert.strictEqual(canvasInstance.height, 0, 'Canvas height must be reset to 0');
+
+      // 5. Canvas GPU memory cleanup on encode errors
+      global.document.createElement = (tag) => {
+        if (tag === 'canvas') {
+          const canvas = {
+            width: 100,
+            height: 100,
+            getContext: () => ({
+              imageSmoothingEnabled: true,
+              imageSmoothingQuality: 'high',
+              drawImage: () => {},
+            }),
+            toBlob: (cb) => {
+              // Return null for all formats to simulate total encode failure
+              cb(null);
+            },
+          };
+          canvasInstance = canvas;
+          return canvas;
+        }
+        return {};
+      };
+
+      let threw = false;
+      try {
+        await optimizeImageForUpload(jpegFile);
+      } catch (err) {
+        threw = true;
+      }
+      assert.strictEqual(threw, true, 'Must throw error when encoding fails');
+      assert.strictEqual(canvasInstance.width, 0, 'Canvas width must be reset to 0 even on encode failure');
+      assert.strictEqual(canvasInstance.height, 0, 'Canvas height must be reset to 0 even on encode failure');
+
+    } finally {
+      global.window = origWindow;
+      global.document = origDocument;
+      global.Image = origImage;
+      URL.createObjectURL = origCreateObjectURL;
+      URL.revokeObjectURL = origRevokeObjectURL;
+    }
+  });
+
+  await test('imageOptimizer JSDoc comments do not contain stale references to leaving images under 2MB untouched', () => {
+    assert.strictEqual(optimizerContent.includes('< 2MB and within max dimensions) untouched'), false, 'Must not contain stale < 2MB untouched comment');
+    assert.match(optimizerContent, /strip(s)?\s+(100% of embedded\s+)?EXIF metadata/i, 'Must document EXIF metadata stripping');
+    assert.match(optimizerContent, /Cleans up canvas GPU memory/i, 'Must document canvas GPU memory cleanup');
   });
 
   await test('storage.rules contract alignment: allowed types and 5MB quota match exactly between client and backend rules', () => {
@@ -394,6 +638,51 @@ async function runTestSuite() {
     assert.match(modalContent, /validateImageContent\(file\)/, 'StickerTrayModal must validate content on file selection');
     assert.match(modalContent, /uploadStatus/, 'StickerTrayModal must track upload and optimization status');
     assert.match(modalContent, /Auto-resized & optimized/, 'UI must communicate auto-resize optimization');
+  });
+
+  await test('StickerTrayModal anonymizes photo sticker label to Photo rather than leaking user filename', () => {
+    assert.match(modalContent, /onPlacePhoto\(permanentUrl,\s*\{\s*kind:\s*'photo',\s*label:\s*'Photo'\s*\}\)/, 'Must pass Photo as label instead of file.name');
+    assert.strictEqual(modalContent.includes('label: file.name'), false, 'Must not leak file.name in sticker label');
+  });
+
+  await test('Header and PreviewModal remove settings gear button, Sparkles icon, and nerd pink pills', () => {
+    assert.strictEqual(headerContent.includes('onOpenSettings'), false, 'Header must not include Settings button');
+    assert.strictEqual(headerContent.includes('<Settings'), false, 'Header must not render Settings icon');
+    assert.strictEqual(headerContent.includes('<Sparkles'), false, 'Header generate webpage button must not include Sparkles icon');
+    assert.strictEqual(headerContent.includes('built by your nerd'), false, 'Header must not include built by your nerd pink pill');
+    assert.strictEqual(previewModalContent.includes('Coded by your nerd'), false, 'PreviewModal must not include Coded by your nerd pink pill');
+  });
+
+  await test('StickerTrayModal includes scrollable/searchable GIFs and Sticker/Washi Tray with Spotify/Music feature removed', () => {
+    assert.strictEqual(modalContent.includes('PRESET_SAMPLE_PHOTOS'), false, 'Static sample photos must be replaced with GIFs');
+    assert.match(modalContent, /api\.giphy\.com\/v1\/gifs\/search/, 'Must support Giphy public GIF search');
+    assert.match(modalContent, /g\.tenor\.com\/v1\/search/, 'Must support Tenor public GIF search fallback');
+    assert.match(modalContent, /CURATED_GIFS/, 'Must include curated GIF fallback library');
+    assert.match(modalContent, /PASTEL_WASHI_TAPES/, 'Must include Washi Tape strips');
+    assert.match(modalContent, /AESTHETIC_STICKERS/, 'Must include Aesthetic Stickers');
+    assert.strictEqual(modalContent.includes('buildMusicWidgetSvgUrl'), false, 'Spotify/Music widget must be removed');
+    assert.strictEqual(modalContent.toLowerCase().includes('spotify'), false, 'Spotify references must be removed');
+  });
+
+  await test('Production readiness: removes brewing nerd magic badge, green dot in update pill, and dev/mock fallbacks', () => {
+    const authModalContent = fs.readFileSync(path.join(pwaDir, 'src', 'components', 'AuthModal.tsx'), 'utf8');
+    const toolbarContent = fs.readFileSync(path.join(pwaDir, 'src', 'components', 'Toolbar.tsx'), 'utf8');
+    const firebaseConfigContent = fs.readFileSync(path.join(pwaDir, 'src', 'config', 'firebase.ts'), 'utf8');
+    const rootIndexHtml = fs.readFileSync(path.resolve(pwaDir, '..', 'index.html'), 'utf8');
+    const liveSiteIndexHtml = fs.readFileSync(path.resolve(pwaDir, '..', 'live-site', 'index.html'), 'utf8');
+
+    assert.strictEqual(appContent.includes('Brewing some nerd magic'), false, 'App must not show Brewing some nerd magic badge');
+    assert.strictEqual(appContent.includes('doodlebug_mock_user'), false, 'App must not contain dev mock auth state');
+    assert.strictEqual(authModalContent.includes('handleMockSignIn'), false, 'AuthModal must not contain mock sign-in');
+    assert.strictEqual(clientContent.includes('generateMockPreview'), false, 'workerClient must not contain mock preview fallback');
+    assert.strictEqual(previewModalContent.includes('localhost:4000'), false, 'PreviewModal must not hardcode localhost:4000');
+    assert.match(previewModalContent, /publishResult\.htmlUrl/, 'PreviewModal must link to publishResult.htmlUrl');
+    assert.match(previewModalContent, /resolveLiveSiteUrl/, 'PreviewModal must resolve GitHub blob URLs to live GitHub Pages site');
+    assert.match(firebaseConfigContent, /your-project-id/, 'firebase.ts must reject .env.example placeholder project ID');
+    assert.strictEqual(storageContent.includes('select a sample photo'), false, 'storageService must not reference removed sample photo feature');
+    assert.strictEqual(toolbarContent.includes('Music'), false, 'Toolbar must not include Music button');
+    assert.strictEqual(rootIndexHtml.includes('badge-dot'), false, 'index.html must not contain green badge-dot');
+    assert.strictEqual(liveSiteIndexHtml.includes('badge-dot'), false, 'live-site/index.html must not contain green badge-dot');
   });
 
   console.log('\n═══════════════════════════════════════════════════════');

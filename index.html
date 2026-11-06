@@ -4,6 +4,14 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Doodlebug</title>
+  <!-- PWA Meta Tags & Manifest -->
+  <meta name="theme-color" content="#FFFDF5" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="My Site" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+  <link rel="apple-touch-icon" href="apple-touch-icon.png" />
   <link rel="stylesheet" href="styles.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -53,12 +61,6 @@
       color: #059669;
       border: 1px solid #a7f3d0;
     }
-    .badge-dot {
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      background: #10b981;
-    }
     main {
       flex: 1;
       width: 100%;
@@ -84,14 +86,7 @@
       display: block;
     }
     footer {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 16px 24px;
-      font-size: 0.875rem;
-      color: #78716c;
-      border-top: 1px solid var(--stone-line, #E7E5E4);
-      background: rgba(255, 253, 245, 0.9);
+      display: none;
     }
   </style>
 </head>
@@ -101,9 +96,8 @@
       <span class="logo-icon">🐛</span>
       <span>Doodlebug</span>
     </div>
-    <div class="header-badge">
-      <span class="badge-dot"></span>
-      <span>live</span>
+    <div class="header-badge" id="update-badge" title="Last updated time">
+      <span id="update-time">Last updated</span>
     </div>
   </header>
 
@@ -120,10 +114,58 @@
     </div>
   </main>
 
-  <footer>
-    <p>made with love ♡ • Doodlebug</p>
-  </footer>
+  <footer style="display: none;"></footer>
 
   <script src="iframe-resizer.js"></script>
+  <script>
+    (function() {
+      const badgeText = document.getElementById('update-time');
+      if (!badgeText) return;
+
+      function timeAgo(date) {
+        const seconds = Math.floor((new Date() - date) / 1000);
+        if (seconds < 60) return 'Just now';
+        const minutes = Math.floor(seconds / 60);
+        if (minutes < 60) return `${minutes}m ago`;
+        const hours = Math.floor(minutes / 60);
+        if (hours < 24) return `${hours}h ago`;
+        const days = Math.floor(hours / 24);
+        if (days === 1) return 'Yesterday';
+        if (days < 30) return `${days}d ago`;
+        return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      }
+
+      fetch('https://api.github.com/repos/kieranpatton01/DoodleBug/commits?path=canvas.html&page=1&per_page=1')
+        .then(function(res) {
+          if (!res.ok) throw new Error();
+          return res.json();
+        })
+        .then(function(commits) {
+          if (commits && commits[0] && commits[0].commit && commits[0].commit.committer) {
+            const date = new Date(commits[0].commit.committer.date);
+            badgeText.textContent = 'Last updated ' + timeAgo(date);
+          }
+        })
+        .catch(function() {
+          try {
+            const mod = new Date(document.lastModified);
+            if (!isNaN(mod.getTime()) && mod.getFullYear() > 2020) {
+              badgeText.textContent = 'Last updated ' + timeAgo(mod);
+            } else {
+              badgeText.textContent = 'Last updated';
+            }
+          } catch(e) {
+            badgeText.textContent = 'Last updated';
+          }
+        });
+    })();
+  </script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function() {
+        navigator.serviceWorker.register('sw.js').catch(function() {});
+      });
+    }
+  </script>
 </body>
 </html>

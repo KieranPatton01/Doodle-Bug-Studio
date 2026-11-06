@@ -5,14 +5,12 @@ import { Toolbar } from './components/Toolbar';
 import { ColorPickerModal } from './components/ColorPickerModal';
 import { BrushPickerModal } from './components/BrushPickerModal';
 import { TextModal } from './components/TextModal';
-import { StickerTrayModal } from './components/StickerTrayModal';
-import { VibeSelector } from './components/VibeSelector';
+import { StickerTrayModal, PlaceStickerOptions } from './components/StickerTrayModal';
 import { PreviewModal } from './components/PreviewModal';
 import { AuthModal } from './components/AuthModal';
-import { SettingsModal } from './components/SettingsModal';
 import { 
   ToolType, 
-  VibeType, 
+  StickerTrayTab,
   CanvasTextNote, 
   CanvasSticker, 
   GenerateResult, 
@@ -30,7 +28,6 @@ export const App: React.FC = () => {
   const [currentTool, setCurrentTool] = useState<ToolType>('brush');
   const [brushColor, setBrushColor] = useState<string>('#0f172a');
   const [brushSize, setBrushSize] = useState<number>(8);
-  const [currentVibe, setCurrentVibe] = useState<VibeType>('Cute Handwritten');
 
   // Canvas elements state (starts empty without hardcoded notes)
   const [textNotes, setTextNotes] = useState<CanvasTextNote[]>([]);
@@ -43,10 +40,9 @@ export const App: React.FC = () => {
   const [isBrushPickerOpen, setIsBrushPickerOpen] = useState(false);
   const [isTextModalOpen, setIsTextModalOpen] = useState(false);
   const [isStickerTrayOpen, setIsStickerTrayOpen] = useState(false);
-  const [isVibeSelectorOpen, setIsVibeSelectorOpen] = useState(false);
+  const [stickerTrayTab, setStickerTrayTab] = useState<StickerTrayTab>('gifs');
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
-  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
 
   // API Execution states
   const [isGenerating, setIsGenerating] = useState(false);
@@ -56,36 +52,14 @@ export const App: React.FC = () => {
   const [errorNotification, setErrorNotification] = useState<string | null>(null);
 
   // Auth state
-  const [authState, setAuthState] = useState<AuthState>(() => {
-    // Only restore saved demo/mock login in local development mode to avoid broken mock states in production
-    if (import.meta.env.DEV) {
-      const savedMock = sessionStorage.getItem('doodlebug_mock_user');
-      if (savedMock) {
-        return {
-          isAuthenticated: true,
-          user: {
-            uid: 'gf-authorized-uid-12345',
-            email: 'lily@doodlebug.site',
-            displayName: 'Lily (Site Owner)',
-          },
-          idToken: 'mock-token-uid-gf-authorized-uid-12345',
-          isMockMode: true,
-        };
-      }
-    }
-    return {
-      isAuthenticated: false,
-      user: null,
-      idToken: null,
-      isMockMode: false,
-    };
+  const [authState, setAuthState] = useState<AuthState>({
+    isAuthenticated: false,
+    user: null,
+    idToken: null,
   });
 
   // Get a fresh ID token at request time (prevents 1-hour expiration 401s)
   const getFreshIdToken = async (): Promise<string | null> => {
-    if (authState.isMockMode) {
-      return authState.idToken;
-    }
     const auth = getFirebaseAuth();
     if (auth?.currentUser) {
       try {
@@ -118,19 +92,13 @@ export const App: React.FC = () => {
             displayName: firebaseUser.displayName,
           },
           idToken,
-          isMockMode: false,
         });
       } else {
-        // Sign-out or null session: clear state unless in active dev mock mode
-        const savedMock = import.meta.env.DEV ? sessionStorage.getItem('doodlebug_mock_user') : null;
-        if (!savedMock) {
-          setAuthState({
-            isAuthenticated: false,
-            user: null,
-            idToken: null,
-            isMockMode: false,
-          });
-        }
+        setAuthState({
+          isAuthenticated: false,
+          user: null,
+          idToken: null,
+        });
       }
     });
 
@@ -139,11 +107,6 @@ export const App: React.FC = () => {
 
   const handleUpdateAuthState = (newAuth: AuthState) => {
     setAuthState(newAuth);
-    if (import.meta.env.DEV && newAuth.isMockMode && newAuth.isAuthenticated) {
-      sessionStorage.setItem('doodlebug_mock_user', 'true');
-    } else {
-      sessionStorage.removeItem('doodlebug_mock_user');
-    }
   };
 
   const handleStrokeCountChange = React.useCallback((undoAvailable: boolean, redoAvailable: boolean) => {
@@ -153,11 +116,14 @@ export const App: React.FC = () => {
 
   // Add text note to canvas
   const handleAddTextNote = (noteData: Omit<CanvasTextNote, 'id' | 'x' | 'y'>) => {
+    const dims = canvasRef.current?.getDimensions?.() || { width: 390, height: 600 };
+    const noteWidth = 140;
+    const centerX = Math.max(10, Math.round((dims.width - noteWidth) / 2));
     const newNote: CanvasTextNote = {
       ...noteData,
       id: Math.random().toString(36).substring(2, 9),
-      x: 60,
-      y: 120 + textNotes.length * 50,
+      x: centerX,
+      y: 100 + (textNotes.length % 6) * 45,
     };
     setTextNotes((prev) => [...prev, newNote]);
   };
@@ -170,16 +136,25 @@ export const App: React.FC = () => {
     setTextNotes((prev) => prev.filter((n) => n.id !== id));
   }, []);
 
-  // Add photo sticker to canvas
-  const handlePlacePhoto = (photoUrl: string) => {
+  // Add photo, GIF, sticker, or washi tape to canvas
+  const handlePlacePhoto = (photoUrl: string, options?: PlaceStickerOptions) => {
+    const dims = canvasRef.current?.getDimensions?.() || { width: 390, height: 600 };
+    const stickerWidth = options?.width || 140;
+    const stickerHeight = options?.height || 140;
+    const centerX = Math.max(10, Math.round((dims.width - stickerWidth) / 2));
+    const baseY = Math.max(40, Math.round((dims.height - stickerHeight) / 2));
+    const stagger = (stickers.length % 5) * 15;
+
     const newSticker: CanvasSticker = {
       id: Math.random().toString(36).substring(2, 9),
       url: photoUrl,
-      x: 40 + stickers.length * 30,
-      y: 200 + stickers.length * 30,
-      width: 140,
-      height: 140,
-      rotation: (Math.random() - 0.5) * 8, // slight aesthetic polaroid tilt
+      x: centerX,
+      y: baseY + stagger,
+      width: stickerWidth,
+      height: stickerHeight,
+      rotation: 0, // Upright, no automatic tilt or offset
+      kind: options?.kind,
+      label: options?.label,
     };
     setStickers((prev) => [...prev, newSticker]);
   };
@@ -207,13 +182,25 @@ export const App: React.FC = () => {
 
     try {
       const snapshotBase64 = await canvasRef.current.exportSnapshot();
-      const imageUrls = stickers.map((s) => s.url);
-      const notes = textNotes.map((n) => n.text).join('\n');
+      const imageUrls = Array.from(
+        new Set(
+          stickers
+            .filter((s) => s.url.startsWith('https://'))
+            .map((s) => s.url)
+        )
+      ).slice(0, 20);
+
+      const noteLines = textNotes.map((n) => n.text);
+      for (const s of stickers) {
+        if ((s.kind === 'sticker' || s.kind === 'washi') && s.label) {
+          noteLines.push(`[Decorative ${s.kind}: ${s.label}]`);
+        }
+      }
+      const notes = noteLines.join('\n').slice(0, 4000);
 
       const result = await callGenerateApi({
         snapshotBase64,
         imageUrls,
-        vibe: currentVibe,
         notes,
         idToken: currentToken,
       });
@@ -222,8 +209,8 @@ export const App: React.FC = () => {
       setIsPreviewModalOpen(true);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error('❌ [PWA Vibecode Error]:', err);
-      setErrorNotification(message.startsWith('Generation failed:') ? message : `Generation failed: ${message}`);
+      console.error('❌ [PWA Generation Error]:', err);
+      setErrorNotification(`Oops! Your nerd got a little confused: ${message}`);
     } finally {
       setIsGenerating(false);
     }
@@ -238,14 +225,14 @@ export const App: React.FC = () => {
     try {
       const result = await callPublishApi({
         html: generateResult.html,
-        commitMessage: `🎨 Doodlebug: new ${currentVibe} layout via Vibecode`,
+        commitMessage: '🎨 Doodlebug: new layout coded by your nerd',
         idToken: currentToken,
       });
       setPublishResult(result);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error('❌ [PWA Publish Error]:', err);
-      setErrorNotification(message.startsWith('Publish failed:') ? message : `Publish failed: ${message}`);
+      setErrorNotification(`Oops! Your nerd had trouble publishing: ${message}`);
     } finally {
       setIsPublishing(false);
     }
@@ -256,30 +243,29 @@ export const App: React.FC = () => {
       
       {/* Top Navigation & Actions Bar */}
       <Header
-        currentVibe={currentVibe}
-        onOpenVibeSelector={() => setIsVibeSelectorOpen(true)}
         onVibecode={handleVibecode}
         isGenerating={isGenerating}
         authState={authState}
         onOpenAuth={() => setIsAuthModalOpen(true)}
-        onOpenSettings={() => setIsSettingsModalOpen(true)}
       />
 
-      {/* Core Retro Drawing Canvas Pad */}
-      <main className="flex-1 relative overflow-hidden flex flex-col">
-        <Canvas
-          ref={canvasRef}
-          currentTool={currentTool}
-          brushColor={brushColor}
-          brushSize={brushSize}
-          textNotes={textNotes}
-          stickers={stickers}
-          onUpdateTextNote={handleUpdateTextNote}
-          onDeleteTextNote={handleDeleteTextNote}
-          onUpdateSticker={handleUpdateSticker}
-          onDeleteSticker={handleDeleteSticker}
-          onStrokeCountChange={handleStrokeCountChange}
-        />
+      {/* Core Retro Drawing Canvas Pad - Mobile First Viewport */}
+      <main className="flex-1 relative overflow-hidden flex flex-col items-center justify-center bg-butter sm:bg-stone-100 sm:p-2">
+        <div className="w-full max-w-[430px] h-full relative overflow-hidden flex flex-col bg-butter sm:rounded-3xl sm:border sm:border-stone-300 sm:shadow-retro">
+          <Canvas
+            ref={canvasRef}
+            currentTool={currentTool}
+            brushColor={brushColor}
+            brushSize={brushSize}
+            textNotes={textNotes}
+            stickers={stickers}
+            onUpdateTextNote={handleUpdateTextNote}
+            onDeleteTextNote={handleDeleteTextNote}
+            onUpdateSticker={handleUpdateSticker}
+            onDeleteSticker={handleDeleteSticker}
+            onStrokeCountChange={handleStrokeCountChange}
+          />
+        </div>
       </main>
 
       {/* Thumb-Friendly Bottom Mobile Toolbar */}
@@ -291,7 +277,10 @@ export const App: React.FC = () => {
         onOpenColorPicker={() => setIsColorPickerOpen(true)}
         onOpenBrushPicker={() => setIsBrushPickerOpen(true)}
         onOpenTextModal={() => setIsTextModalOpen(true)}
-        onOpenStickerTray={() => setIsStickerTrayOpen(true)}
+        onOpenStickerTray={(tab = 'gifs') => {
+          setStickerTrayTab(tab);
+          setIsStickerTrayOpen(true);
+        }}
         canUndo={canUndo}
         canRedo={canRedo}
         onUndo={() => canvasRef.current?.undo()}
@@ -331,14 +320,9 @@ export const App: React.FC = () => {
         onClose={() => setIsStickerTrayOpen(false)}
         onPlacePhoto={handlePlacePhoto}
         attachedUrls={stickers.map((s) => s.url)}
+        initialTab={stickerTrayTab}
       />
 
-      <VibeSelector
-        isOpen={isVibeSelectorOpen}
-        onClose={() => setIsVibeSelectorOpen(false)}
-        currentVibe={currentVibe}
-        onSelectVibe={setCurrentVibe}
-      />
 
       <PreviewModal
         isOpen={isPreviewModalOpen}
@@ -356,10 +340,28 @@ export const App: React.FC = () => {
         onUpdateAuthState={handleUpdateAuthState}
       />
 
-      <SettingsModal
-        isOpen={isSettingsModalOpen}
-        onClose={() => setIsSettingsModalOpen(false)}
-      />
+      {/* Nerd Building Webpage Loading Screen with Animated GIF */}
+      {isGenerating && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in select-none">
+          <div className="bg-white rounded-3xl border-2 border-pink-200 shadow-2xl p-6 sm:p-8 max-w-sm w-full flex flex-col items-center text-center">
+            <div className="relative mb-4">
+              <img
+                src="https://media1.tenor.com/m/IVh7YxGaB_4AAAAC/nerd-emoji.gif"
+                alt="Your nerd is coding your webpage"
+                className="w-32 h-32 rounded-2xl object-contain shadow-sm border border-stone-200"
+              />
+              <span className="absolute -bottom-2 -right-2 text-2xl">💻</span>
+            </div>
+            <h3 className="font-extrabold text-slate-900 text-lg sm:text-xl mb-1.5 flex items-center justify-center gap-1.5">
+              <span>Your nerd is coding!</span>
+              <span>🤓</span>
+            </h3>
+            <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
+              Turning your cute drawing and photos into a real webpage for you...
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Floating Error Notification Toast */}
       {errorNotification && (

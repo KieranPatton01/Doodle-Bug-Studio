@@ -5,11 +5,12 @@ import {
   Highlighter, 
   Type, 
   Image as ImageIcon, 
+  Sparkles,
   RotateCcw, 
   RotateCw, 
   Trash2 
 } from 'lucide-react';
-import { ToolType } from '../types';
+import { ToolType, StickerTrayTab } from '../types';
 
 interface ToolbarProps {
   currentTool: ToolType;
@@ -19,7 +20,7 @@ interface ToolbarProps {
   onOpenColorPicker: () => void;
   onOpenBrushPicker: () => void;
   onOpenTextModal: () => void;
-  onOpenStickerTray: () => void;
+  onOpenStickerTray: (tab?: StickerTrayTab) => void;
   canUndo: boolean;
   canRedo: boolean;
   onUndo: () => void;
@@ -44,7 +45,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
 }) => {
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-30 p-2 sm:p-3 pointer-events-none flex justify-center">
-      <div className="pointer-events-auto bg-white/95 backdrop-blur-md border border-stone-300 shadow-retro rounded-3xl p-1.5 sm:p-2 flex items-center gap-1 sm:gap-2 max-w-full overflow-x-auto scrollbar-none">
+      <div className="pointer-events-auto bg-white/95 backdrop-blur-md border border-stone-300 shadow-retro rounded-3xl p-1.5 sm:p-2 flex items-center gap-1 sm:gap-1.5 max-w-full overflow-x-auto scrollbar-none">
         
         {/* Brush Tool */}
         <button
@@ -55,7 +56,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               onSelectTool('brush');
             }
           }}
-          className={`relative p-2.5 sm:p-3 rounded-2xl flex flex-col items-center justify-center transition-all transform active:scale-90 ${
+          className={`relative p-2 sm:p-2.5 rounded-2xl flex flex-col items-center justify-center transition-all transform active:scale-90 ${
             currentTool === 'brush'
               ? 'bg-slate-900 text-white shadow-xs'
               : 'text-slate-600 hover:bg-stone-100'
@@ -69,7 +70,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         {/* Marker Tool */}
         <button
           onClick={() => onSelectTool('marker')}
-          className={`p-2.5 sm:p-3 rounded-2xl flex flex-col items-center justify-center transition-all transform active:scale-90 ${
+          className={`p-2 sm:p-2.5 rounded-2xl flex flex-col items-center justify-center transition-all transform active:scale-90 ${
             currentTool === 'marker'
               ? 'bg-slate-900 text-white shadow-xs'
               : 'text-slate-600 hover:bg-stone-100'
@@ -83,7 +84,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         {/* Eraser Tool */}
         <button
           onClick={() => onSelectTool('eraser')}
-          className={`p-2.5 sm:p-3 rounded-2xl flex flex-col items-center justify-center transition-all transform active:scale-90 ${
+          className={`p-2 sm:p-2.5 rounded-2xl flex flex-col items-center justify-center transition-all transform active:scale-90 ${
             currentTool === 'eraser'
               ? 'bg-slate-900 text-white shadow-xs'
               : 'text-slate-600 hover:bg-stone-100'
@@ -101,7 +102,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           title="Color Palette"
         >
           <div
-            className="w-6 h-6 rounded-full border-2 border-slate-900 shadow-xs"
+            className="w-5 h-5 rounded-full border-2 border-slate-900 shadow-xs"
             style={{ backgroundColor: brushColor }}
           />
           <span className="text-[10px] font-semibold mt-0.5 text-slate-700">Color</span>
@@ -112,21 +113,31 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         {/* Add Text Note */}
         <button
           onClick={onOpenTextModal}
-          className="p-2.5 sm:p-3 rounded-2xl text-slate-700 hover:bg-stone-100 flex flex-col items-center justify-center transition-all transform active:scale-90"
+          className="p-2 sm:p-2.5 rounded-2xl text-slate-700 hover:bg-stone-100 flex flex-col items-center justify-center transition-all transform active:scale-90"
           title="Add Handwritten Text Note"
         >
           <Type className="w-5 h-5 text-amber-700" />
           <span className="text-[10px] font-semibold mt-0.5">Note</span>
         </button>
 
-        {/* Image / Sticker Tray */}
+        {/* Photo & GIF Browser */}
         <button
-          onClick={onOpenStickerTray}
-          className="p-2.5 sm:p-3 rounded-2xl text-slate-700 hover:bg-stone-100 flex flex-col items-center justify-center transition-all transform active:scale-90"
-          title="Upload / Drop Photos to Firebase"
+          onClick={() => onOpenStickerTray('gifs')}
+          className="p-2 sm:p-2.5 rounded-2xl text-slate-700 hover:bg-stone-100 flex flex-col items-center justify-center transition-all transform active:scale-90"
+          title="Upload Photos or Search Cute GIFs"
         >
           <ImageIcon className="w-5 h-5 text-pink-600" />
-          <span className="text-[10px] font-semibold mt-0.5">Photo</span>
+          <span className="text-[10px] font-semibold mt-0.5">GIF/Pic</span>
+        </button>
+
+        {/* Aesthetic Sticker & Washi Tape Tray */}
+        <button
+          onClick={() => onOpenStickerTray('stickers')}
+          className="p-2 sm:p-2.5 rounded-2xl text-slate-700 hover:bg-stone-100 flex flex-col items-center justify-center transition-all transform active:scale-90"
+          title="Aesthetic Sticker & Washi Tape Tray"
+        >
+          <Sparkles className="w-5 h-5 text-rose-500" />
+          <span className="text-[10px] font-semibold mt-0.5">Stickers</span>
         </button>
 
         <div className="w-[1px] h-8 bg-stone-200 mx-0.5" />

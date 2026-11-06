@@ -304,13 +304,35 @@ export function calculateTargetDimensions(
 }
 
 /**
+ * Generates an anonymized, collision-resistant filename for uploaded photos.
+ * Prevents leaking local device metadata, camera identifiers, or personal filenames
+ * (e.g. IMG_20241025_FamilyVacation.jpg) in public storage URLs.
+ */
+export function generateAnonymizedFileName(mimeType: string): string {
+  const cleanType = (mimeType || '').split(';')[0].toLowerCase().trim();
+  const ext =
+    cleanType === 'image/png'
+      ? '.png'
+      : cleanType === 'image/webp'
+      ? '.webp'
+      : cleanType === 'image/gif'
+      ? '.gif'
+      : '.jpg';
+  const token = Math.random().toString(36).substring(2, 8).padEnd(6, '0');
+  return `photo_${Date.now()}_${token}${ext}`;
+}
+
+/**
  * Optimizes an image on the client device using an HTML Canvas before upload.
- * - Leaves animated GIFs untouched to preserve multi-frame animation (ensuring valid MIME type)
- * - Leaves small images (< 2MB and within max dimensions) untouched (ensuring valid MIME type)
- * - Resizes large camera photos (e.g. 4032x3024 12MB) to <= 1600px with high smoothing
- * - Compresses JPEG to 85% quality (producing ~300KB-800KB sharp files)
+ * - Leaves animated GIFs untouched to preserve multi-frame animation (ensuring valid MIME type and anonymized filename)
+ * - Always re-encodes photos through canvas to strip EXIF metadata (GPS coords, camera serials, timestamps)
+ * - Preserves PNG and WebP alpha transparency
+ * - Downscales heavy camera photos (e.g. 4032x3024 12MB) to <= 1600px with high smoothing
+ * - Compresses JPEG/WebP to 85% quality (producing ~300KB-800KB sharp files)
  * - Progressively recompresses if needed to guarantee resulting file is <= 5MB
+ * - Anonymizes output filename to prevent leaking local device or user file names
  * - Guarantees output File has an allowed raster MIME type matching storage.rules
+ * - Cleans up canvas GPU memory after encoding
  */
 export async function optimizeImageForUpload(
   file: File,
@@ -340,23 +362,19 @@ export async function optimizeImageForUpload(
   const detectedType = validation.detectedType;
 
   // 3. Animated GIFs: do not run through canvas (would flatten to single frame).
-  // Ensure the returned file has strict MIME type 'image/gif'.
+  // Ensure the returned file has strict MIME type 'image/gif' and anonymized filename.
   if (detectedType === 'image/gif') {
-    if (file.type === 'image/gif') {
-      return file;
-    }
-    return new File([file], file.name, {
+    const anonymizedName = generateAnonymizedFileName('image/gif');
+    return new File([file], anonymizedName, {
       type: 'image/gif',
       lastModified: file.lastModified || Date.now(),
     });
   }
 
-  // 4. Non-browser environment guard (e.g. Node tests)
+  // 4. Non-browser environment guard (e.g. Node tests without DOM/Canvas)
   if (typeof window === 'undefined' || typeof document === 'undefined') {
-    if (file.type === detectedType) {
-      return file;
-    }
-    return new File([file], file.name, {
+    const anonymizedName = generateAnonymizedFileName(detectedType);
+    return new File([file], anonymizedName, {
       type: detectedType,
       lastModified: file.lastModified || Date.now(),
     });
@@ -393,16 +411,11 @@ export async function optimizeImageForUpload(
     throw new Error('Image contains invalid dimensions (0x0).');
   }
 
-  // 6. If already compact and within dimensions, return file (ensuring valid MIME type)
-  if (origWidth <= maxDimension && origHeight <= maxDimension && file.size <= 2 * 1024 * 1024) {
-    if (file.type === detectedType) {
-      return file;
-    }
-    return new File([file], file.name, {
-      type: detectedType,
-      lastModified: file.lastModified || Date.now(),
-    });
-  }
+  // 6. Security & Privacy Guardrail: Always re-encode photos through canvas
+  // Even if an image is already compact (<= 1600px), we NEVER return
+  // the raw camera file directly. Re-encoding through <canvas> strips 100% of embedded
+  // EXIF metadata (GPS latitude/longitude, home address, camera serial numbers, timestamps)
+  // before the photo is uploaded to the public Firebase Storage bucket.
 
   options?.onProgress?.('Resizing photo on device...');
 
@@ -414,88 +427,138 @@ export async function optimizeImageForUpload(
   );
 
   const canvas = document.createElement('canvas');
-  canvas.width = targetWidth;
-  canvas.height = targetHeight;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) {
-    throw new Error('Canvas 2D context is unavailable for image optimization.');
-  }
-
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
-
-  // Determine output MIME type
-  let outputMime = detectedType === 'image/png' ? 'image/png' : 'image/jpeg';
-  let quality = 0.85;
-
-  const exportBlob = (mime: string, q: number): Promise<Blob | null> => {
-    return new Promise((resolve) => {
-      if (canvas.toBlob) {
-        canvas.toBlob((b) => resolve(b), mime, q);
-      } else {
-        try {
-          const dataUrl = canvas.toDataURL(mime, q);
-          fetch(dataUrl)
-            .then((res) => res.blob())
-            .then((b) => resolve(b))
-            .catch(() => resolve(null));
-        } catch {
-          resolve(null);
-        }
-      }
-    });
-  };
-
-  let blob = await exportBlob(outputMime, quality);
-
-  // If PNG still exceeds max storage size (5MB), transcode to lossy WebP to retain alpha while shrinking
-  if (outputMime === 'image/png' && blob && blob.size > maxFileSize) {
-    options?.onProgress?.('Compressing photo...');
-    const webpBlob = await exportBlob('image/webp', 0.85);
-    if (webpBlob && webpBlob.size < blob.size) {
-      blob = webpBlob;
-      outputMime = 'image/webp';
+  try {
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      throw new Error('Canvas 2D context is unavailable for image optimization.');
     }
-  }
 
-  // Progressive compression loop for JPEG/WebP if still above maxFileSize
-  const qualities = [0.75, 0.65, 0.50];
-  let qIdx = 0;
-  while (blob && blob.size > maxFileSize && qIdx < qualities.length) {
-    options?.onProgress?.('Compressing photo...');
-    quality = qualities[qIdx++];
-    const smallerBlob = await exportBlob(outputMime, quality);
-    if (smallerBlob) {
-      blob = smallerBlob;
-    }
-  }
-
-  // If still above 5MB, downscale canvas dimensions by 0.75x
-  if (blob && blob.size > maxFileSize) {
-    currentMaxDim = Math.round(currentMaxDim * 0.75);
-    const scaled = calculateTargetDimensions(origWidth, origHeight, currentMaxDim);
-    canvas.width = scaled.width;
-    canvas.height = scaled.height;
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(img, 0, 0, scaled.width, scaled.height);
-    const downscaledBlob = await exportBlob(outputMime, 0.75);
-    if (downscaledBlob) {
-      blob = downscaledBlob;
+    ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
+
+    // Determine output MIME type: preserve WebP and PNG alpha channels
+    let outputMime =
+      detectedType === 'image/png'
+        ? 'image/png'
+        : detectedType === 'image/webp'
+        ? 'image/webp'
+        : 'image/jpeg';
+    let quality = 0.85;
+
+    const exportBlob = (mime: string, q: number): Promise<Blob | null> => {
+      return new Promise((resolve) => {
+        let settled = false;
+        const done = (b: Blob | null) => {
+          if (!settled) {
+            settled = true;
+            clearTimeout(timeoutId);
+            resolve(b);
+          }
+        };
+        const timeoutId = setTimeout(() => done(null), 8000);
+
+        try {
+          if (typeof canvas.toBlob === 'function') {
+            canvas.toBlob((b) => done(b), mime, q);
+          } else {
+            const dataUrl = canvas.toDataURL(mime, q);
+            fetch(dataUrl)
+              .then((res) => res.blob())
+              .then((b) => done(b))
+              .catch(() => done(null));
+          }
+        } catch {
+          done(null);
+        }
+      });
+    };
+
+    let blob = await exportBlob(outputMime, quality);
+
+    // Fallback if browser canvas does not support image/webp export
+    // Per HTML Canvas standard, if a format is unsupported, browsers return an image/png Blob
+    // or invoke the callback with null (e.g. older Safari/WebKit engines).
+    if (outputMime === 'image/webp' && (!blob || blob.size === 0 || blob.type !== 'image/webp')) {
+      if (blob && blob.size > 0 && blob.type === 'image/png') {
+        outputMime = 'image/png';
+      } else {
+        const pngBlob = await exportBlob('image/png', 1.0);
+        if (pngBlob && pngBlob.size > 0) {
+          blob = pngBlob;
+          outputMime = 'image/png';
+        } else {
+          blob = await exportBlob('image/jpeg', quality);
+          outputMime = 'image/jpeg';
+        }
+      }
+    }
+
+    // If PNG still exceeds max storage size (5MB), transcode to lossy WebP to retain alpha while shrinking
+    if (outputMime === 'image/png' && blob && blob.size > maxFileSize) {
+      options?.onProgress?.('Compressing photo...');
+      const webpBlob = await exportBlob('image/webp', 0.85);
+      if (webpBlob && webpBlob.type === 'image/webp' && webpBlob.size < blob.size) {
+        blob = webpBlob;
+        outputMime = 'image/webp';
+      }
+    }
+
+    // Progressive compression loop for JPEG/WebP if still above maxFileSize
+    const qualities = [0.75, 0.65, 0.50];
+    let qIdx = 0;
+    while (blob && blob.size > maxFileSize && qIdx < qualities.length) {
+      if (outputMime === 'image/png') {
+        break;
+      }
+      options?.onProgress?.('Compressing photo...');
+      quality = qualities[qIdx++];
+      const smallerBlob = await exportBlob(outputMime, quality);
+      if (smallerBlob && smallerBlob.size > 0) {
+        blob = smallerBlob;
+      }
+    }
+
+    // If still above maxFileSize (5MB), progressively downscale canvas dimensions
+    let downscaleAttempts = 0;
+    while (blob && blob.size > maxFileSize && currentMaxDim > 400 && downscaleAttempts < 3) {
+      downscaleAttempts++;
+      options?.onProgress?.('Downscaling photo dimensions...');
+      currentMaxDim = Math.round(currentMaxDim * 0.75);
+      const scaled = calculateTargetDimensions(origWidth, origHeight, currentMaxDim);
+      canvas.width = scaled.width;
+      canvas.height = scaled.height;
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(img, 0, 0, scaled.width, scaled.height);
+      const downscaledBlob = await exportBlob(outputMime, outputMime === 'image/png' ? 1.0 : 0.75);
+      if (downscaledBlob && downscaledBlob.size > 0) {
+        blob = downscaledBlob;
+      } else {
+        break;
+      }
+    }
+
+    if (!blob || blob.size === 0) {
+      throw new Error('Failed to encode optimized photo.');
+    }
+
+    const anonymizedName = generateAnonymizedFileName(outputMime);
+
+    return new File([blob], anonymizedName, {
+      type: outputMime,
+      lastModified: Date.now(),
+    });
+  } finally {
+    // Explicitly release canvas GPU memory buffers to prevent mobile browser memory bloat
+    canvas.width = 0;
+    canvas.height = 0;
+    try {
+      img.src = '';
+    } catch {
+      // Ignore if img is already detached
     }
   }
-
-  if (!blob) {
-    throw new Error('Failed to encode optimized photo.');
-  }
-
-  const ext = outputMime === 'image/png' ? '.png' : outputMime === 'image/webp' ? '.webp' : '.jpg';
-  const rawBaseName = file.name.replace(/\.[^/.]+$/, '').replace(/[^a-zA-Z0-9_-]/g, '_');
-  const baseName = rawBaseName || 'photo';
-
-  return new File([blob], `${baseName}${ext}`, {
-    type: outputMime,
-    lastModified: Date.now(),
-  });
 }

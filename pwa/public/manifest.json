@@ -1,7 +1,7 @@
 {
-  "name": "Doodlebug CMS",
-  "short_name": "Doodlebug",
-  "description": "Mobile-first retro canvas CMS powered by Gemini Flash",
+  "name": "Doodlebug Studio",
+  "short_name": "Studio",
+  "description": "Draw, decorate, and build your live personal website 🎨🐛",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#FFFDF5",

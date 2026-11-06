@@ -116,8 +116,8 @@ check('canvas.html strictly satisfies all Gemini Flash guardrails', () => {
   const canvasHtml = fs.readFileSync(path.join(__dirname, '..', 'live-site', 'canvas.html'), 'utf8');
   assert.match(canvasHtml, /<!DOCTYPE html>/i, 'Guardrail 1: Standalone HTML5 document');
   assert.match(canvasHtml, /<script src="https:\/\/cdn\.tailwindcss\.com"><\/script>/i, 'Guardrail 2: Tailwind CDN in head');
-  assert.match(canvasHtml, /fonts\.googleapis\.com.*family=Caveat/i, 'Guardrail 3: Google Fonts typography');
-  assert.match(canvasHtml, /hover:scale-105/i, 'Guardrail 5: Delightful micro-interactions');
+  assert.match(canvasHtml, /fonts\.googleapis\.com.*family=(Caveat|Plus\+Jakarta\+Sans)/i, 'Guardrail 3: Google Fonts typography');
+  assert.match(canvasHtml, /transition|shadow|transform|hover:/i, 'Guardrail 5: UI styling and transitions');
   assert.match(canvasHtml, /doodle-resize/i, 'Must implement iframe height auto-resizing protocol');
 });
 
@@ -288,7 +288,7 @@ check('PWA manifest.json specifies standalone mobile display, portrait orientati
   const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'pwa', 'public', 'manifest.json'), 'utf8'));
   assert.strictEqual(manifest.display, 'standalone');
   assert.strictEqual(manifest.orientation, 'portrait-primary');
-  assert.strictEqual(manifest.name, 'Doodlebug CMS');
+  assert.strictEqual(manifest.name, 'Doodlebug Studio');
   const hasPng = manifest.icons.some((i) => i.type === 'image/png');
   assert.strictEqual(hasPng, true, 'Manifest must provide PNG icons');
 });

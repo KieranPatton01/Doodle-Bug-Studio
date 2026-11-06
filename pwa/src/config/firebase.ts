@@ -37,7 +37,14 @@ export function getFirebaseConfig(): FirebaseClientConfig | null {
   const envProj = import.meta.env.VITE_FIREBASE_PROJECT_ID;
 
   // Refuse fake placeholders or missing config
-  if (!envKey || !envProj || envKey.includes('PlaceholderKey123') || envProj === 'doodlebug-cms') {
+  if (
+    !envKey ||
+    !envProj ||
+    envKey.includes('PlaceholderKey123') ||
+    envKey.includes('...') ||
+    envProj === 'doodlebug-cms' ||
+    envProj === 'your-project-id'
+  ) {
     return null;
   }
 

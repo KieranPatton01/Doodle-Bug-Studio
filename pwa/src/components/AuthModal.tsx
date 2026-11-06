@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Lock, LogIn, LogOut, CheckCircle, AlertCircle, Sparkles } from 'lucide-react';
+import { X, Lock, LogIn, LogOut, CheckCircle, AlertCircle } from 'lucide-react';
 import { 
   signInWithEmailAndPassword, 
   signInWithPopup, 
@@ -52,7 +52,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           displayName: userCredential.user.displayName,
         },
         idToken,
-        isMockMode: false,
       });
       onClose();
     } catch (err) {
@@ -86,7 +85,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           displayName: result.user.displayName,
         },
         idToken,
-        isMockMode: false,
       });
       onClose();
     } catch (err) {
@@ -96,23 +94,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
   };
 
-  const handleMockSignIn = () => {
-    const mockUid = 'gf-authorized-uid-12345';
-    onUpdateAuthState({
-      isAuthenticated: true,
-      user: {
-        uid: mockUid,
-        email: 'lily@doodlebug.site',
-        displayName: 'Lily (Site Owner)',
-      },
-      idToken: `mock-token-uid-${mockUid}`,
-      isMockMode: true,
-    });
-    onClose();
-  };
-
   const handleSignOut = async () => {
-    sessionStorage.removeItem('doodlebug_mock_user');
     const auth = getFirebaseAuth();
     if (auth) {
       try {
@@ -125,7 +107,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       isAuthenticated: false,
       user: null,
       idToken: null,
-      isMockMode: false,
     });
   };
 
@@ -137,7 +118,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Lock className="w-5 h-5 text-slate-800" />
-            <h3 className="font-extrabold text-slate-900 text-base">Site Owner Access</h3>
+            <h3 className="font-extrabold text-slate-900 text-base">VIP Creator Access 💖</h3>
           </div>
           <button onClick={onClose} className="p-1 rounded-xl hover:bg-stone-100 text-slate-500">
             <X className="w-4 h-4" />
@@ -145,7 +126,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         </div>
 
         <p className="text-xs text-slate-500">
-          Only the authorized account configured on the Cloudflare Worker can generate code and publish live changes.
+          Sign in so your nerd knows it's really you before publishing your website to the world!
         </p>
 
         {authState.isAuthenticated ? (
@@ -159,11 +140,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               <p className="font-bold">{authState.user?.displayName || 'Authorized User'}</p>
               <p className="font-mono text-[11px] text-slate-500">{authState.user?.email}</p>
               <p className="font-mono text-[10px] text-slate-400 break-all">UID: {authState.user?.uid}</p>
-              {authState.isMockMode && (
-                <span className="inline-block mt-1 px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-bold">
-                  🧪 Local Demo Mode
-                </span>
-              )}
             </div>
             <button
               onClick={handleSignOut}
@@ -230,19 +206,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </svg>
               <span>Sign In with Google</span>
             </button>
-
-            {import.meta.env.DEV && (
-              <div className="pt-2 border-t border-stone-200">
-                <button
-                  type="button"
-                  onClick={handleMockSignIn}
-                  className="w-full py-2 rounded-xl bg-pink-50 hover:bg-pink-100 border border-pink-200 text-pink-700 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors"
-                >
-                  <Sparkles className="w-3.5 h-3.5 text-pink-500" />
-                  <span>Test Mode / Instant Demo Login</span>
-                </button>
-              </div>
-            )}
           </div>
         )}
 

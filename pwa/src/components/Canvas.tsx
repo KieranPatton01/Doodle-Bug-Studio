@@ -11,6 +11,7 @@ export interface CanvasHandle {
   redo: () => void;
   canUndo: boolean;
   canRedo: boolean;
+  getDimensions?: () => { width: number; height: number };
 }
 
 interface CanvasProps {
@@ -324,6 +325,13 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(({
     },
     canUndo: strokes.length > 0,
     canRedo: redoStack.length > 0,
+    getDimensions: () => {
+      if (containerRef.current) {
+        const rect = containerRef.current.getBoundingClientRect();
+        return { width: rect.width, height: rect.height };
+      }
+      return { width: 390, height: 600 };
+    },
     exportSnapshot: () =>
       renderCanvasSnapshot({
         container: containerRef.current,

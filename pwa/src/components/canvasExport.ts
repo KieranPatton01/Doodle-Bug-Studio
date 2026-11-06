@@ -129,20 +129,25 @@ export async function renderCanvasSnapshot({
       ctx.drawImage(strokesCanvas, 0, 0, rect.width, rect.height);
     }
 
-    // 4. Draw dropped photo stickers onto export canvas
+    // 4. Draw dropped photo stickers, GIFs, aesthetic stickers, and washi tapes onto export canvas
     for (const sticker of stickers) {
       ctx.save();
       ctx.translate(sticker.x + sticker.width / 2, sticker.y + sticker.height / 2);
       ctx.rotate((sticker.rotation * Math.PI) / 180);
 
-      // White polaroid-style frame
-      ctx.fillStyle = '#FFFFFF';
-      ctx.shadowColor = 'rgba(0,0,0,0.15)';
-      ctx.shadowBlur = 8;
-      ctx.fillRect(-sticker.width / 2 - 4, -sticker.height / 2 - 4, sticker.width + 8, sticker.height + 24);
+      const isFrameless =
+        sticker.kind === 'sticker' || sticker.kind === 'washi';
+
+      if (!isFrameless) {
+        // White polaroid-style frame for photos and GIFs
+        ctx.fillStyle = '#FFFFFF';
+        ctx.shadowColor = 'rgba(0,0,0,0.15)';
+        ctx.shadowBlur = 8;
+        ctx.fillRect(-sticker.width / 2 - 4, -sticker.height / 2 - 4, sticker.width + 8, sticker.height + 24);
+      }
 
       const img = loadedImages.get(sticker.id);
-      if (drawRealImages && img) {
+      if ((drawRealImages || sticker.url.startsWith('data:image/')) && img) {
         try {
           ctx.drawImage(img, -sticker.width / 2, -sticker.height / 2, sticker.width, sticker.height);
         } catch {
@@ -155,7 +160,7 @@ export async function renderCanvasSnapshot({
         ctx.fillStyle = '#DB2777';
         ctx.font = 'bold 12px sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText('📷 Photo', 0, 0);
+        ctx.fillText(sticker.label || '📷 Photo', 0, 0);
       }
       ctx.restore();
     }

@@ -1,19 +1,21 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
   <rect width="100" height="100" rx="28" fill="#FFFDF5"/>
-  <circle cx="50" cy="50" r="42" fill="#FFD6E8" stroke="#000000" stroke-width="4"/>
-  <!-- Cute bug eyes -->
-  <circle cx="38" cy="42" r="6" fill="#000000"/>
-  <circle cx="62" cy="42" r="6" fill="#000000"/>
-  <circle cx="39" cy="40" r="2" fill="#FFFFFF"/>
-  <circle cx="63" cy="40" r="2" fill="#FFFFFF"/>
-  <!-- Cute blush -->
-  <ellipse cx="28" cy="52" rx="5" ry="3" fill="#FF8CB7" opacity="0.6"/>
-  <ellipse cx="72" cy="52" rx="5" ry="3" fill="#FF8CB7" opacity="0.6"/>
+  <circle cx="50" cy="52" r="38" fill="#FFD6E8" stroke="#1E293B" stroke-width="4"/>
+  <!-- Paint antenna -->
+  <path d="M 35 24 Q 42 12 32 12" fill="transparent" stroke="#1E293B" stroke-width="3" stroke-linecap="round"/>
+  <path d="M 65 24 Q 58 12 68 12" fill="transparent" stroke="#1E293B" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="32" cy="12" r="4.5" fill="#38BDF8"/>
+  <circle cx="68" cy="12" r="4.5" fill="#F43F5E"/>
+  <!-- Eyes -->
+  <circle cx="38" cy="46" r="5.5" fill="#0F172A"/>
+  <circle cx="62" cy="46" r="5.5" fill="#0F172A"/>
+  <circle cx="39" cy="44" r="2" fill="#FFFFFF"/>
+  <circle cx="63" cy="44" r="2" fill="#FFFFFF"/>
+  <!-- Blush -->
+  <ellipse cx="28" cy="56" rx="5" ry="3" fill="#F472B6" opacity="0.8"/>
+  <ellipse cx="72" cy="56" rx="5" ry="3" fill="#F472B6" opacity="0.8"/>
   <!-- Smile -->
-  <path d="M 40 54 Q 50 64 60 54" fill="transparent" stroke="#000000" stroke-width="4" stroke-linecap="round"/>
-  <!-- Paint brush antenna -->
-  <path d="M 35 24 Q 42 12 30 10" fill="transparent" stroke="#000000" stroke-width="3" stroke-linecap="round"/>
-  <path d="M 65 24 Q 58 12 70 10" fill="transparent" stroke="#000000" stroke-width="3" stroke-linecap="round"/>
-  <circle cx="30" cy="10" r="4" fill="#38BDF8"/>
-  <circle cx="70" cy="10" r="4" fill="#F43F5E"/>
+  <path d="M 40 58 Q 50 68 60 58" fill="transparent" stroke="#1E293B" stroke-width="3.5" stroke-linecap="round"/>
+  <!-- Artist Palette Emblem -->
+  <circle cx="76" cy="76" r="7" fill="#38BDF8"/>
 </svg>

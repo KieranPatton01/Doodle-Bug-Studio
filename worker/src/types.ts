@@ -38,16 +38,17 @@ export interface GenerateRequest {
   snapshotBase64: string;
   /** Optional array of permanent photo download URLs uploaded to Firebase Storage */
   imageUrls?: string[];
-  /** Aesthetic vibe choice */
-  vibe?: 'Default Modern' | 'Cute Handwritten' | 'Pastel Aesthetic' | 'Dark Mode Neon' | 'Retro 90s Web' | 'Minimal Editorial' | string;
   /** Optional handwritten notes or prompt instructions */
   notes?: string;
+  /** Deprecated legacy vibe parameter (theming has been removed) */
+  vibe?: string;
 }
 
 export interface GenerateResponse {
   html: string;
-  vibe: string;
   model: string;
+  /** Deprecated legacy vibe parameter */
+  vibe?: string;
 }
 
 export interface PublishRequest {

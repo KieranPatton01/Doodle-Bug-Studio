@@ -300,14 +300,14 @@ async function runAllTests() {
   console.log('\n--- 2. Gemini System Prompt & Guardrails Tests ---');
 
   await test('Prompt enforces Self-Contained Document guardrail', () => {
-    const prompt = buildGeminiPrompt('Cute Handwritten', 'My cute dog', ['https://firebasestorage.googleapis.com/photo1.jpg']);
+    const prompt = buildGeminiPrompt('My cute dog', ['https://firebasestorage.googleapis.com/photo1.jpg']);
     assert.match(prompt, /<!DOCTYPE html>/i);
     assert.match(prompt, /<head>/i);
     assert.match(prompt, /<body>/i);
   });
 
   await test('Prompt enforces Tailwind CDN guardrail', () => {
-    const prompt = buildGeminiPrompt('Cute Handwritten', '', []);
+    const prompt = buildGeminiPrompt('', []);
     assert.match(prompt, /cdn\.tailwindcss\.com/);
   });
 
@@ -316,25 +316,50 @@ async function runAllTests() {
       'https://firebasestorage.googleapis.com/v0/b/doodle.appspot.com/pic1.png',
       'https://firebasestorage.googleapis.com/v0/b/doodle.appspot.com/pic2.png',
     ];
-    const prompt = buildGeminiPrompt('Pastel Aesthetic', 'Summer memory', photoUrls);
+    const prompt = buildGeminiPrompt('Summer memory', photoUrls);
     assert.match(prompt, /NEVER use base64 placeholders/i);
     assert.match(prompt, new RegExp(photoUrls[0]));
     assert.match(prompt, new RegExp(photoUrls[1]));
   });
 
   await test('Prompt enforces Typography for cute/handwritten (Caveat/Kalam)', () => {
-    const prompt = buildGeminiPrompt('Cute Handwritten', '', []);
+    const prompt = buildGeminiPrompt('', []);
     assert.match(prompt, /Caveat/i);
   });
 
   await test('Prompt enforces Micro-Interactions (hover:scale, transitions)', () => {
-    const prompt = buildGeminiPrompt('Default Modern', '', []);
+    const prompt = buildGeminiPrompt('', []);
     assert.match(prompt, /hover:scale/i);
   });
 
   await test('Prompt enforces No Toxic JavaScript guardrail', () => {
-    const prompt = buildGeminiPrompt('Default Modern', '', []);
+    const prompt = buildGeminiPrompt('', []);
     assert.match(prompt, /NO TOXIC JAVASCRIPT/i);
+  });
+
+  await test('Prompt enforces exact visual fidelity without website theming overrides', () => {
+    const prompt = buildGeminiPrompt('', []);
+    assert.match(prompt, /IDENTICAL/i);
+    assert.match(prompt, /theming is completely disabled/i);
+    assert.strictEqual(prompt.includes('CURRENT VIBE SELECTION'), false);
+  });
+
+  await test('Prompt enforces mobile-first design for mobile browser', () => {
+    const prompt = buildGeminiPrompt('', []);
+    assert.match(prompt, /mobile first/i);
+    assert.match(prompt, /mobile browser/i);
+    assert.match(prompt, /meta name="viewport"/i);
+  });
+
+  await test('Prompt retains user notes when called with single argument', () => {
+    const prompt = buildGeminiPrompt('My cafe menu doodle');
+    assert.match(prompt, /My cafe menu doodle/);
+  });
+
+  await test('Sanitizer automatically injects mobile viewport meta tag when missing', () => {
+    const raw = '<!DOCTYPE html><html><head><script src="https://cdn.tailwindcss.com"></script></head><body><h1>Hello</h1></body></html>';
+    const cleaned = sanitizeHtmlResponse(raw);
+    assert.match(cleaned, /<meta name="viewport" content="width=device-width, initial-scale=1\.0">/i);
   });
 
   await test('Sanitizer strips markdown ```html and ``` code fences cleanly', () => {
@@ -382,7 +407,6 @@ async function runAllTests() {
     try {
       const res = await generateCanvasFromDoodle({
         snapshotBase64: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
-        vibe: 'Cute Handwritten',
         notes: 'Coffee time',
         imageUrls: ['https://example.com/pic.jpg'],
       }, testEnv);
@@ -391,7 +415,7 @@ async function runAllTests() {
       assert.strictEqual(res.html.includes('```'), false);
       assert.match(res.html, /doodle-resize/);
       assert.match(res.html, /Hello/);
-      assert.strictEqual(res.vibe, 'Cute Handwritten');
+      assert.strictEqual(res.model, 'gemini-3.8-flash');
     } finally {
       global.fetch = origFetch;
     }
@@ -595,7 +619,7 @@ async function runAllTests() {
         'Content-Type': 'application/json',
         'Authorization': 'Bearer mock-token-uid-gf-authorized-uid-12345',
       },
-      body: JSON.stringify({ vibe: 'Cute Handwritten' }),
+      body: JSON.stringify({ notes: 'test without snapshot' }),
     });
     const res = await workerDefault.fetch(req, devEnv);
     assert.strictEqual(res.status, 400);
@@ -1020,6 +1044,22 @@ async function runAllTests() {
     const req = new Request('https://worker.test/unknown-endpoint', { method: 'GET' });
     const res = await workerDefault.fetch(req, testEnv);
     assert.strictEqual(res.status, 404);
+  });
+
+  await test('isValidImageUrl allows Tenor and Giphy HTTPS GIF URLs while rejecting HTTP and untrusted domains', () => {
+    const prodEnv = { ...testEnv, DEV_BYPASS_AUTH: 'false', FIREBASE_PROJECT_ID: 'doodlebug-pwa-demo', ENVIRONMENT: 'production' };
+    assert.strictEqual(isValidImageUrl('https://media1.tenor.com/m/aKFaZBrZFYcAAAAC/peach-cat-heart.gif', prodEnv), true);
+    assert.strictEqual(isValidImageUrl('https://media.giphy.com/media/JIX9t2j0ZTN9S/giphy.gif', prodEnv), true);
+    assert.strictEqual(isValidImageUrl('http://media1.tenor.com/m/aKFaZBrZFYcAAAAC/peach-cat-heart.gif', prodEnv), false);
+    assert.strictEqual(isValidImageUrl('https://evil-tenor.com/bad.gif', prodEnv), false);
+  });
+
+  await test('buildGeminiPrompt includes instructions for GIFs, aesthetic stickers, and washi tape', () => {
+    const prompt = buildGeminiPrompt('[Decorative sticker: Kawaii Kitty Sticker]', ['https://media1.tenor.com/m/cat.gif']);
+    assert.match(prompt, /washi tape/i);
+    assert.match(prompt, /Kawaii Kitty Sticker/);
+    assert.match(prompt, /https:\/\/media1\.tenor\.com\/m\/cat\.gif/);
+    assert.strictEqual(prompt.includes('Current Obsession'), false, 'Music widget rules must be removed');
   });
 
   console.log('\n═══════════════════════════════════════════════════════');
