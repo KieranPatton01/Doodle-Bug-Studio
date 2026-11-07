@@ -39,7 +39,7 @@ jobs:
           VITE_FIREBASE_PROJECT_ID: doodlebug-ddc9c
           VITE_FIREBASE_STORAGE_BUCKET: doodlebug-ddc9c.firebasestorage.app
           VITE_WORKER_URL: https://doodlebug-gateway.isingingbanana.workers.dev
-          VITE_LIVE_SITE_URL: https://kieranpatton01.github.io/DoodleBug/
+          VITE_LIVE_SITE_URL: https://islacowper.co.uk/
         run: |
           npm ci
           npm run build
