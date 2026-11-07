@@ -178,6 +178,79 @@ export async function callPublishApi(params: PublishParams): Promise<PublishResu
   return data;
 }
 
+export interface UploadPhotoParams {
+  dataBase64: string;
+  mimeType: string;
+  fileName: string;
+  idToken: string;
+}
+
+export interface UploadPhotoResult {
+  success: boolean;
+  url: string;
+  path: string;
+  commitSha: string;
+}
+
+/**
+ * Calls Cloudflare Worker /api/upload to store an optimized photo in the GitHub img/ folder
+ */
+export async function callUploadPhotoApi(params: UploadPhotoParams): Promise<UploadPhotoResult> {
+  const baseUrl = getWorkerBaseUrl();
+  if (!baseUrl) {
+    throw new Error('Cloudflare Worker URL is not configured. Please set VITE_WORKER_URL in your environment configuration.');
+  }
+
+  const url = `${baseUrl}/api/upload`;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${params.idToken}`,
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        dataBase64: params.dataBase64,
+        mimeType: params.mimeType,
+        fileName: params.fileName,
+      }),
+    });
+  } catch (networkErr) {
+    clearTimeout(timeoutId);
+    if (networkErr instanceof Error && (networkErr.name === 'AbortError' || networkErr.message.includes('aborted'))) {
+      throw new Error('Photo upload timed out after 30 seconds. Please try again.');
+    }
+    throw networkErr;
+  }
+
+  clearTimeout(timeoutId);
+
+  if (!response.ok) {
+    let errorDetail = '';
+    try {
+      const errorData = (await response.json()) as { error?: string; message?: string };
+      errorDetail = errorData.error || errorData.message || response.statusText;
+    } catch {
+      errorDetail = await response.text().catch(() => response.statusText);
+    }
+    const fullErrorMessage = `[HTTP ${response.status}] ${errorDetail || 'Server error'}`;
+    console.error(`❌ Cloudflare Worker /api/upload error [HTTP ${response.status}]:`, {
+      url,
+      status: response.status,
+      statusText: response.statusText,
+      error: errorDetail,
+    });
+    throw new Error(fullErrorMessage);
+  }
+
+  return (await response.json()) as UploadPhotoResult;
+}
+
 export interface AssistApiParams {
   prompt: string;
   width: number;

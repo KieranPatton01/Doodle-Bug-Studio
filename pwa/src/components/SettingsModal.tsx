@@ -16,11 +16,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const [isChecking, setIsChecking] = useState(false);
   const [healthStatus, setHealthStatus] = useState<Record<string, unknown> | null>(null);
 
-  // Firebase config state
+  // Firebase config state (Auth only - Free Spark Tier)
   const [fbApiKey, setFbApiKey] = useState('');
   const [fbProjectId, setFbProjectId] = useState('');
   const [fbAuthDomain, setFbAuthDomain] = useState('');
-  const [fbStorageBucket, setFbStorageBucket] = useState('');
   const [fbAppId, setFbAppId] = useState('');
 
   useEffect(() => {
@@ -30,7 +29,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       setFbApiKey(fb.apiKey || '');
       setFbProjectId(fb.projectId || '');
       setFbAuthDomain(fb.authDomain || '');
-      setFbStorageBucket(fb.storageBucket || '');
       setFbAppId(fb.appId || '');
     }
     setErrorMessage(null);
@@ -62,7 +60,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       apiKey: fbApiKey.trim(),
       projectId: fbProjectId.trim(),
       authDomain: fbAuthDomain.trim() || `${fbProjectId.trim()}.firebaseapp.com`,
-      storageBucket: fbStorageBucket.trim() || `${fbProjectId.trim()}.appspot.com`,
       messagingSenderId: '',
       appId: fbAppId.trim(),
     };
@@ -81,7 +78,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     setFbApiKey('');
     setFbProjectId('');
     setFbAuthDomain('');
-    setFbStorageBucket('');
     setFbAppId('');
     setStatusMessage('Firebase configuration cleared from storage.');
     setTimeout(() => setStatusMessage(null), 3000);
@@ -208,7 +204,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         {activeTab === 'firebase' && (
           <form onSubmit={handleSaveFirebase} className="space-y-2.5">
             <p className="text-xs text-slate-500">
-              Configure your public Firebase project identifiers for Authentication and photo uploads in Storage.
+              Configure your public Firebase project identifiers for Authentication (Free Spark Tier). Photos are saved to your GitHub img/ folder.
             </p>
 
             <div>
@@ -232,17 +228,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 placeholder="your-project-id"
                 className="w-full p-2 text-xs rounded-xl border border-stone-300 focus:outline-none focus:border-slate-900 font-mono"
                 required
-              />
-            </div>
-
-            <div>
-              <label className="block text-[11px] font-bold text-slate-700 mb-0.5">Storage Bucket</label>
-              <input
-                type="text"
-                value={fbStorageBucket}
-                onChange={(e) => setFbStorageBucket(e.target.value)}
-                placeholder="your-project-id.appspot.com"
-                className="w-full p-2 text-xs rounded-xl border border-stone-300 focus:outline-none focus:border-slate-900 font-mono"
               />
             </div>
 

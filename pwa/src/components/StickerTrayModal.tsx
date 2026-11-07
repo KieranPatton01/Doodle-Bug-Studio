@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { X, Upload, Sparkles, Loader2, Search } from 'lucide-react';
-import { uploadPhotoToFirebase, validateImageFile, validateImageContent } from '../services/storageService';
+import { uploadPhotoToGitHub, validateImageFile, validateImageContent } from '../services/storageService';
 import { StickerTrayTab, CanvasSticker } from '../types';
 
 export interface PlaceStickerOptions {
@@ -659,7 +659,7 @@ export const StickerTrayModal: React.FC<StickerTrayModalProps> = ({
     setUploadStatus('Optimizing photo on device...');
 
     try {
-      const permanentUrl = await uploadPhotoToFirebase(file, (status) => {
+      const permanentUrl = await uploadPhotoToGitHub(file, (status) => {
         setUploadStatus(status);
       });
       onPlacePhoto(permanentUrl, { kind: 'photo', label: 'Photo' });
@@ -744,7 +744,7 @@ export const StickerTrayModal: React.FC<StickerTrayModalProps> = ({
                   <>
                     <Loader2 className="w-5 h-5 text-pink-600 animate-spin" />
                     <span className="text-xs font-semibold text-pink-700">
-                      {uploadStatus || 'Uploading to Firebase Storage...'}
+                      {uploadStatus || 'Uploading photo to GitHub img/...'}
                     </span>
                   </>
                 ) : (
@@ -754,7 +754,7 @@ export const StickerTrayModal: React.FC<StickerTrayModalProps> = ({
                     </div>
                     <div className="text-left">
                       <span className="text-xs font-bold text-slate-800 block">Upload Photo from Phone</span>
-                      <span className="text-[11px] text-slate-500 block">Auto-resized & optimized • Permanent URL</span>
+                      <span className="text-[11px] text-slate-500 block">Auto-resized & optimized • Saved to GitHub img/</span>
                     </div>
                   </>
                 )}

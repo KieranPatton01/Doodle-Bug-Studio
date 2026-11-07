@@ -49,12 +49,20 @@ runStep('Scanning source code for mobile accessibility & secret patterns', () =>
     throw new Error('pwa/index.html must not block accessibility zoom with user-scalable=no');
   }
 
-  const storageRules = fs.readFileSync(path.join(rootDir, 'storage.rules'), 'utf8');
-  if (storageRules.includes('svg+xml')) {
-    throw new Error('storage.rules must not allow svg+xml uploads due to script injection risks');
+  const firebaseJson = JSON.parse(fs.readFileSync(path.join(rootDir, 'firebase.json'), 'utf8'));
+  if (firebaseJson.storage) {
+    throw new Error('firebase.json must not include a storage block (Firebase Spark Free Tier - Auth only)');
   }
-  if (!storageRules.includes('allow list: if false') || storageRules.includes('allow read: if true')) {
-    throw new Error('storage.rules must explicitly disallow public listing (allow list: if false) to prevent bucket scraping');
+
+  const pwaFirebaseTs = fs.readFileSync(path.join(rootDir, 'pwa', 'src', 'config', 'firebase.ts'), 'utf8');
+  const pwaStorageServiceTs = fs.readFileSync(path.join(rootDir, 'pwa', 'src', 'services', 'storageService.ts'), 'utf8');
+  if (pwaFirebaseTs.includes('firebase/storage') || pwaStorageServiceTs.includes('firebase/storage')) {
+    throw new Error('PWA must not import firebase/storage; photos are stored in the GitHub img/ folder');
+  }
+
+  const workerGithubTs = fs.readFileSync(path.join(rootDir, 'worker', 'src', 'github.ts'), 'utf8');
+  if (!workerGithubTs.includes('sniffRasterMimeTypeFromBase64') || !workerGithubTs.includes('uploadImageToGitHub')) {
+    throw new Error('worker/src/github.ts must enforce magic-byte raster image verification for GitHub img/ uploads');
   }
 
   const wranglerToml = fs.readFileSync(path.join(rootDir, 'worker', 'wrangler.toml'), 'utf8');

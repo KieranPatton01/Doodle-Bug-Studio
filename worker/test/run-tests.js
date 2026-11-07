@@ -24,7 +24,14 @@ console.log('✅ Compilation successful. Testing real compiled modules from dist
 
 const { verifyFirebaseToken, setCachedJwks } = require('../dist-test/auth.js');
 const { buildGeminiPrompt, sanitizeHtmlResponse, generateCanvasFromDoodle } = require('../dist-test/gemini.js');
-const { getGitHubConfig, utf8ToBase64, commitCanvasToGitHub } = require('../dist-test/github.js');
+const {
+  getGitHubConfig,
+  utf8ToBase64,
+  commitCanvasToGitHub,
+  uploadImageToGitHub,
+  cleanupUnusedGitHubImages,
+  sniffRasterMimeTypeFromBase64,
+} = require('../dist-test/github.js');
 const workerDefault = require('../dist-test/index.js').default;
 const { getCorsHeaders, checkRateLimit, resetRateLimits, isValidImageUrl, validateCanvasHtml } = require('../dist-test/index.js');
 
@@ -300,7 +307,7 @@ async function runAllTests() {
   console.log('\n--- 2. Gemini System Prompt & Guardrails Tests ---');
 
   await test('Prompt enforces Self-Contained Document guardrail', () => {
-    const prompt = buildGeminiPrompt('My cute dog', ['https://firebasestorage.googleapis.com/photo1.jpg']);
+    const prompt = buildGeminiPrompt('My cute dog', ['https://islacowper.co.uk/img/photo1.jpg']);
     assert.match(prompt, /<!DOCTYPE html>/i);
     assert.match(prompt, /<head>/i);
     assert.match(prompt, /<body>/i);
@@ -311,10 +318,10 @@ async function runAllTests() {
     assert.match(prompt, /cdn\.tailwindcss\.com/);
   });
 
-  await test('Prompt enforces zero Base64 placeholder and embeds exact Firebase URLs', () => {
+  await test('Prompt enforces zero Base64 placeholder and embeds exact GitHub img/ URLs', () => {
     const photoUrls = [
-      'https://firebasestorage.googleapis.com/v0/b/doodle.appspot.com/pic1.png',
-      'https://firebasestorage.googleapis.com/v0/b/doodle.appspot.com/pic2.png',
+      'https://islacowper.co.uk/img/photo_101_abc123.png',
+      'https://islacowper.co.uk/img/photo_102_def456.jpg',
     ];
     const prompt = buildGeminiPrompt('Summer memory', photoUrls);
     assert.match(prompt, /NEVER use base64 placeholders/i);
@@ -707,7 +714,7 @@ async function runAllTests() {
       },
       body: JSON.stringify({
         snapshotBase64: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
-        imageUrls: ['http://firebasestorage.googleapis.com/v0/b/bucket/o/photo.png'],
+        imageUrls: ['http://islacowper.co.uk/img/photo_123_abc123.png'],
       }),
     });
     const res = await workerDefault.fetch(req, devEnv);
@@ -834,17 +841,141 @@ async function runAllTests() {
     assert.match(data.error, /meta refresh/i);
   });
 
-  await test('isValidImageUrl restricts to configured FIREBASE_PROJECT_ID bucket and rejects prefix bypass', () => {
-    const prodEnv = { ...testEnv, DEV_BYPASS_AUTH: 'false', FIREBASE_PROJECT_ID: 'doodlebug-pwa-demo', ENVIRONMENT: 'production' };
-    const validBucketUrl = 'https://firebasestorage.googleapis.com/v0/b/doodlebug-pwa-demo.appspot.com/o/doodle_photos%2Fpic.png?alt=media';
-    const foreignBucketUrl = 'https://firebasestorage.googleapis.com/v0/b/foreign-hacker-project.appspot.com/o/doodle_photos%2Fpic.png?alt=media';
-    const prefixBypassUrl1 = 'https://firebasestorage.googleapis.com/v0/b/doodlebug-pwa-demo-evil.appspot.com/o/photo.png';
-    const prefixBypassUrl2 = 'https://storage.googleapis.com/doodlebug-pwa-demo-evil/photo.png';
+  await test('isValidImageUrl restricts to GitHub img/ folder on live domain & repo, and rejects Firebase Storage / foreign repos / SVGs / traversal / query / credentials', () => {
+    const prodEnv = { ...testEnv, DEV_BYPASS_AUTH: 'false', ENVIRONMENT: 'production' };
+    const validLiveImgUrl = 'https://islacowper.co.uk/img/photo_1730000_abc123.jpg';
+    const validGhPagesImgUrl = 'https://testowner.github.io/testrepo/img/photo_1730000_abc123.png';
+    const validRawGhImgUrl = 'https://raw.githubusercontent.com/testowner/testrepo/main/img/photo_1730000_abc123.webp';
+    const foreignRepoUrl = 'https://raw.githubusercontent.com/foreign-hacker/evilrepo/main/img/photo_1730000_abc123.jpg';
+    const nonImgPathUrl = 'https://islacowper.co.uk/other/photo.png';
+    const svgImgUrl = 'https://islacowper.co.uk/img/vector.svg';
+    const legacyFirebaseStorageUrl = 'https://firebasestorage.googleapis.com/v0/b/doodlebug-pwa-demo.appspot.com/o/pic.png?alt=media';
+    const encodedTraversalUrl = 'https://islacowper.co.uk/img/..%2Fcanvas.html';
+    const cdnEncodedTraversalUrl = 'https://images.unsplash.com/photo-123/%2e%2e%2fadmin';
+    const queryOnImgUrl = 'https://islacowper.co.uk/img/photo_1730000_abc123.jpg?inject=1';
+    const hashOnImgUrl = 'https://islacowper.co.uk/img/photo_1730000_abc123.jpg#fragment';
+    const credentialsImgUrl = 'https://user:pass@islacowper.co.uk/img/photo_1730000_abc123.jpg';
+    const customPortImgUrl = 'https://islacowper.co.uk:8443/img/photo_1730000_abc123.jpg';
+    const rootGhPagesWrongRepoUrl = 'https://testowner.github.io/img/photo_1730000_abc123.png';
 
-    assert.strictEqual(isValidImageUrl(validBucketUrl, prodEnv), true);
-    assert.strictEqual(isValidImageUrl(foreignBucketUrl, prodEnv), false);
-    assert.strictEqual(isValidImageUrl(prefixBypassUrl1, prodEnv), false, 'Must reject bucket with matching prefix but different name');
-    assert.strictEqual(isValidImageUrl(prefixBypassUrl2, prodEnv), false, 'Must reject storage.googleapis.com bucket prefix bypass');
+    assert.strictEqual(isValidImageUrl(validLiveImgUrl, prodEnv), true);
+    assert.strictEqual(isValidImageUrl(validGhPagesImgUrl, prodEnv), true);
+    assert.strictEqual(isValidImageUrl(validRawGhImgUrl, prodEnv), true);
+    assert.strictEqual(isValidImageUrl(foreignRepoUrl, prodEnv), false, 'Must reject foreign GitHub repository');
+    assert.strictEqual(isValidImageUrl(nonImgPathUrl, prodEnv), false, 'Must reject paths outside /img/');
+    assert.strictEqual(isValidImageUrl(svgImgUrl, prodEnv), false, 'Must reject SVG files in /img/');
+    assert.strictEqual(isValidImageUrl(legacyFirebaseStorageUrl, prodEnv), false, 'Must reject legacy Firebase Storage URLs');
+    assert.strictEqual(isValidImageUrl(encodedTraversalUrl, prodEnv), false, 'Must reject URL-encoded path traversal on img/');
+    assert.strictEqual(isValidImageUrl(cdnEncodedTraversalUrl, prodEnv), false, 'Must reject URL-encoded path traversal on CDN');
+    assert.strictEqual(isValidImageUrl(queryOnImgUrl, prodEnv), false, 'Must reject query strings on img/ URLs');
+    assert.strictEqual(isValidImageUrl(hashOnImgUrl, prodEnv), false, 'Must reject hash fragments on img/ URLs');
+    assert.strictEqual(isValidImageUrl(credentialsImgUrl, prodEnv), false, 'Must reject embedded credentials in URL');
+    assert.strictEqual(isValidImageUrl(customPortImgUrl, prodEnv), false, 'Must reject non-standard port in URL');
+    assert.strictEqual(isValidImageUrl(rootGhPagesWrongRepoUrl, prodEnv), false, 'Must reject root github.io path when repo is a project subpath');
+
+    const subpathEnv = { ...prodEnv, PUBLIC_SITE_URL: 'https://custom.domain.co.uk/subsite' };
+    assert.strictEqual(isValidImageUrl('https://custom.domain.co.uk/subsite/img/photo_1.jpg', subpathEnv), true);
+    assert.strictEqual(isValidImageUrl('https://custom.domain.co.uk/img/photo_1.jpg', subpathEnv), false, 'Must enforce PUBLIC_SITE_URL basePath prefix');
+  });
+
+  await test('POST /api/upload and uploadImageToGitHub commit validated raster photo to GitHub img/, reject disguised SVGs and >5MB payloads', async () => {
+    const devEnv = { ...testEnv, DEV_BYPASS_AUTH: 'true' };
+
+    // 1. Disguised SVG payload must be rejected with 400
+    const svgB64 = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>').toString('base64');
+    const badReq = new Request('https://worker.test/api/upload', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer mock-token-uid-gf-authorized-uid-12345',
+      },
+      body: JSON.stringify({
+        dataBase64: `data:image/jpeg;base64,${svgB64}`,
+        fileName: 'photo_1730000_abc123.jpg',
+      }),
+    });
+    const badRes = await workerDefault.fetch(badReq, devEnv);
+    assert.strictEqual(badRes.status, 400);
+    const badData = await badRes.json();
+    assert.match(badData.error, /Vector images \(SVG\) are not allowed/i);
+
+    // 1b. Payload > 5MB must be rejected before full regex/upload
+    const oversizedB64 = 'A'.repeat(7_000_000); // ~5.25MB decoded
+    const oversizedCheck = sniffRasterMimeTypeFromBase64(oversizedB64);
+    assert.strictEqual(oversizedCheck.valid, false);
+    assert.match(oversizedCheck.error, /5MB upload limit/);
+
+    // 2. Valid PNG payload commits to img/ on GitHub and returns https://islacowper.co.uk/img/...
+    const origFetch = global.fetch;
+    let putUrlCalled = '';
+    global.fetch = async (url, options) => {
+      putUrlCalled = String(url);
+      return new Response(
+        JSON.stringify({ commit: { sha: 'img-upload-commit-sha-123' } }),
+        { status: 201, headers: { 'Content-Type': 'application/json' } }
+      );
+    };
+
+    try {
+      const validPngB64 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+      const okReq = new Request('https://worker.test/api/upload', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer mock-token-uid-gf-authorized-uid-12345',
+        },
+        body: JSON.stringify({
+          dataBase64: validPngB64,
+          fileName: 'photo_1730000123_abc123.png',
+        }),
+      });
+      const okRes = await workerDefault.fetch(okReq, devEnv);
+      assert.strictEqual(okRes.status, 200);
+      const okData = await okRes.json();
+      assert.strictEqual(okData.success, true);
+      assert.strictEqual(okData.path, 'img/photo_1730000123_abc123.png');
+      assert.strictEqual(okData.url, 'https://islacowper.co.uk/img/photo_1730000123_abc123.png');
+      assert.match(putUrlCalled, /\/contents\/img\/photo_1730000123_abc123\.png$/);
+    } finally {
+      global.fetch = origFetch;
+    }
+  });
+
+  await test('cleanupUnusedGitHubImages deletes unreferenced photo_* uploads from img/ while preserving referenced photos, static non-photo_* assets, and .gitkeep', async () => {
+    const origFetch = global.fetch;
+    const deletedUrls = [];
+    global.fetch = async (url, options) => {
+      if (options.method === 'GET') {
+        return new Response(
+          JSON.stringify([
+            { name: '.gitkeep', type: 'file', sha: 'sha-keep' },
+            { name: 'logo.png', type: 'file', sha: 'sha-static-logo' },
+            { name: 'photo_active_111111.jpg', type: 'file', sha: 'sha-active' },
+            { name: 'photo_css_333333.webp', type: 'file', sha: 'sha-css' },
+            { name: 'photo_old_222222.jpg', type: 'file', sha: 'sha-old' },
+          ]),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      if (options.method === 'DELETE') {
+        deletedUrls.push(String(url));
+        return new Response(JSON.stringify({ commit: { sha: 'del-sha' } }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return new Response(null, { status: 404 });
+    };
+
+    try {
+      const html = '<!DOCTYPE html><html><body style="background-image: url(\'https://islacowper.co.uk/img/photo_css_333333.webp\')"><img src="https://islacowper.co.uk/img/photo_active_111111.jpg"></body></html>';
+      const res = await cleanupUnusedGitHubImages(html, testEnv);
+      assert.deepStrictEqual(res.deleted, ['photo_old_222222.jpg']);
+      assert.strictEqual(deletedUrls.length, 1);
+      assert.match(deletedUrls[0], /photo_old_222222\.jpg$/);
+    } finally {
+      global.fetch = origFetch;
+    }
   });
 
   await test('Sanitizer preserves valid JavaScript inside <script> while stripping inline HTML event attributes', () => {

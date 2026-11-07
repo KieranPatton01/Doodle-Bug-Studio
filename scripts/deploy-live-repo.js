@@ -21,16 +21,26 @@ execSync('git config user.name "Kieran Patton"', { cwd: tempDir, stdio: 'inherit
 execSync('git config user.email "kieranpatton01@users.noreply.github.com"', { cwd: tempDir, stdio: 'inherit' });
 execSync('git remote add origin https://github.com/KieranPatton01/DoodleBug.git', { cwd: tempDir, stdio: 'inherit' });
 
-// Preserve currently published canvas.html from origin/main so shell updates never overwrite user's live art
+// Preserve currently published canvas.html and uploaded photos in img/ from origin/main so shell updates never overwrite user's live art
 try {
   execSync('git fetch origin main --depth=1', { cwd: tempDir, stdio: 'inherit' });
-  const liveCanvas = execSync('git show origin/main:canvas.html', { cwd: tempDir, encoding: 'utf8' });
-  if (liveCanvas && liveCanvas.includes('<html')) {
-    fs.writeFileSync(path.join(tempDir, 'canvas.html'), liveCanvas, 'utf8');
-    console.log('✅ Preserved existing published canvas.html from origin/main');
+  try {
+    const liveCanvas = execSync('git show origin/main:canvas.html', { cwd: tempDir, encoding: 'utf8' });
+    if (liveCanvas && liveCanvas.includes('<html')) {
+      fs.writeFileSync(path.join(tempDir, 'canvas.html'), liveCanvas, 'utf8');
+      console.log('✅ Preserved existing published canvas.html from origin/main');
+    }
+  } catch {
+    console.log('ℹ️ Using default template canvas.html');
+  }
+  try {
+    execSync('git checkout origin/main -- img', { cwd: tempDir, stdio: 'pipe' });
+    console.log('✅ Preserved existing uploaded photos in img/ from origin/main');
+  } catch (imgErr) {
+    console.log('ℹ️ Initialized clean img/ directory');
   }
 } catch (err) {
-  console.log('ℹ️ Using default template canvas.html');
+  console.log('ℹ️ Using default template canvas.html and img/ directory');
 }
 
 execSync('git add .', { cwd: tempDir, stdio: 'inherit' });

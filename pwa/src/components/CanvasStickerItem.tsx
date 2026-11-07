@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { Trash2, ImageOff, RotateCw, RotateCcw } from 'lucide-react';
 import { CanvasSticker } from '../types';
+import { resolveLocalPhotoPreview } from '../services/storageService';
 
 interface CanvasStickerItemProps {
   sticker: CanvasSticker;
@@ -117,7 +118,7 @@ export const CanvasStickerItem: React.FC<CanvasStickerItemProps> = ({
           </div>
         ) : (
           <img
-            src={sticker.url}
+            src={resolveLocalPhotoPreview(sticker.url)}
             alt={sticker.label || 'Canvas sticker'}
             className={`w-full h-full pointer-events-none ${
               isFrameless ? 'object-contain drop-shadow-xs' : 'object-cover'

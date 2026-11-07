@@ -1,4 +1,5 @@
 import { DrawingStroke, CanvasSticker, CanvasTextNote } from '../types';
+import { resolveLocalPhotoPreview } from '../services/storageService';
 
 export interface CanvasExportParams {
   container: HTMLDivElement | null;
@@ -53,7 +54,7 @@ export async function renderCanvasSnapshot({
             clearTimeout(timer);
             resolve(false);
           };
-          img.src = sticker.url;
+          img.src = resolveLocalPhotoPreview(sticker.url);
         });
         loadedImages.set(sticker.id, ok && img.naturalWidth > 0 ? img : null);
       } catch {
@@ -147,7 +148,7 @@ export async function renderCanvasSnapshot({
       }
 
       const img = loadedImages.get(sticker.id);
-      if ((drawRealImages || sticker.url.startsWith('data:image/')) && img) {
+      if ((drawRealImages || resolveLocalPhotoPreview(sticker.url).startsWith('data:image/')) && img) {
         try {
           ctx.drawImage(img, -sticker.width / 2, -sticker.height / 2, sticker.width, sticker.height);
         } catch {

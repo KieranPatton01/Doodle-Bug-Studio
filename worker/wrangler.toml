@@ -16,6 +16,7 @@ GITHUB_REPO = "DoodleBug"
 GITHUB_BRANCH = "main"
 GITHUB_COMMITTER_NAME = "Kieran Patton"
 GITHUB_COMMITTER_EMAIL = "kieranpatton01@users.noreply.github.com"
+PUBLIC_SITE_URL = "https://islacowper.co.uk"
 # Restrict CORS to your PWA domain in production (e.g. "https://doodlebug-ddc9c.web.app" or "https://kieranpatton01.github.io").
 CORS_ORIGIN = "http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,https://doodlebug-ddc9c.web.app,https://doodlebug-ddc9c.firebaseapp.com,https://kieranpatton01.github.io,https://islacowper.co.uk,https://www.islacowper.co.uk,https://studio.islacowper.co.uk"
 ENVIRONMENT = "production"

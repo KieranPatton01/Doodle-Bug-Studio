@@ -5,13 +5,21 @@
  * - OPTIONS *              -> CORS preflight handler
  * - GET /health            -> Health check & config summary
  * - POST /api/generate     -> Auth validation + Gemini Flash multimodal code generation
- * - POST /api/publish      -> Auth validation + GitHub REST API commit to canvas.html
+ * - POST /api/publish      -> Auth validation + GitHub REST API commit to canvas.html (+ img/ cleanup)
+ * - POST /api/upload       -> Auth validation + GitHub REST API commit of raster photo to img/
+ * - POST /api/assist       -> Auth validation + Gemini Nerd Assist canvas layout generator
  */
 
-import { Env, GenerateRequest, PublishRequest, AssistRequest } from './types';
+import { Env, GenerateRequest, PublishRequest, AssistRequest, UploadRequest } from './types';
 import { verifyFirebaseToken } from './auth';
 import { generateCanvasFromDoodle, generateCanvasAssistPlan } from './gemini';
-import { commitCanvasToGitHub, getGitHubConfig } from './github';
+import {
+  commitCanvasToGitHub,
+  getGitHubConfig,
+  uploadImageToGitHub,
+  cleanupUnusedGitHubImages,
+  sniffRasterMimeTypeFromBase64,
+} from './github';
 import { validateCanvasHtml } from './validator';
 
 export { validateCanvasHtml };
@@ -63,7 +71,7 @@ export function resetRateLimits(): void {
 }
 
 /**
- * Validates external image URLs: HTTPS only and restricted to Firebase Storage or approved photo CDN
+ * Validates external image URLs: HTTPS only and restricted to the GitHub img/ folder or approved photo/GIF CDNs
  */
 export function isValidImageUrl(url: string, env: Env): boolean {
   if (typeof url !== 'string' || url.length > 1000) return false;
@@ -72,8 +80,26 @@ export function isValidImageUrl(url: string, env: Env): boolean {
   try {
     const parsed = new URL(url);
     if (parsed.protocol !== 'https:') return false;
+    if (parsed.username || parsed.password || parsed.port) return false;
+
     const hostname = parsed.hostname.toLowerCase();
     const pathname = parsed.pathname;
+
+    let decodedPathname = pathname;
+    try {
+      decodedPathname = decodeURIComponent(pathname);
+    } catch {
+      return false;
+    }
+
+    if (
+      pathname.includes('..') ||
+      pathname.includes('\\') ||
+      decodedPathname.includes('..') ||
+      decodedPathname.includes('\\')
+    ) {
+      return false;
+    }
 
     // Supported aesthetic photo & GIF CDNs (Unsplash, Tenor, Giphy used in Doodlebug PWA tray)
     if (
@@ -98,38 +124,68 @@ export function isValidImageUrl(url: string, env: Env): boolean {
       return true;
     }
 
-    // If FIREBASE_PROJECT_ID is configured, restrict strictly to the project's own storage bucket
-    const projectId = env.FIREBASE_PROJECT_ID;
-    if (projectId) {
-      const allowedBuckets = [
-        `${projectId}.appspot.com`,
-        `${projectId}.firebasestorage.app`,
-        projectId,
-      ];
+    // GitHub img/ URLs must not include query strings or hash fragments
+    if (parsed.search || parsed.hash) {
+      return false;
+    }
 
-      if (hostname === 'firebasestorage.googleapis.com') {
-        return allowedBuckets.some(
-          (b) => pathname === `/v0/b/${b}` || pathname.startsWith(`/v0/b/${b}/`)
-        );
+    const safeImgFileRegex = /^\/img\/[a-zA-Z0-9._-]+\.(?:jpg|jpeg|png|webp|gif)$/i;
+
+    // 1. Live showcase custom domain (https://islacowper.co.uk/img/...)
+    if (hostname === 'islacowper.co.uk' || hostname === 'www.islacowper.co.uk') {
+      return safeImgFileRegex.test(pathname);
+    }
+
+    // 2. Configured PUBLIC_SITE_URL domain if set
+    if (env.PUBLIC_SITE_URL) {
+      try {
+        const pubUrl = new URL(env.PUBLIC_SITE_URL);
+        if (pubUrl.protocol === 'https:' && hostname === pubUrl.hostname.toLowerCase()) {
+          const basePath = pubUrl.pathname.replace(/\/+$/, '');
+          if (basePath) {
+            if (pathname.startsWith(`${basePath}/`)) {
+              const relPath = pathname.slice(basePath.length);
+              if (safeImgFileRegex.test(relPath)) {
+                return true;
+              }
+            }
+          } else if (safeImgFileRegex.test(pathname)) {
+            return true;
+          }
+        }
+      } catch {
+        // ignore malformed PUBLIC_SITE_URL
       }
-      if (hostname === 'storage.googleapis.com') {
-        return allowedBuckets.some(
-          (b) => pathname === `/${b}` || pathname.startsWith(`/${b}/`)
-        );
+    }
+
+    // 3. GitHub Pages & raw.githubusercontent.com strictly scoped to configured owner/repo img/ folder
+    const ghConfig = getGitHubConfig(env);
+    const owner = (ghConfig.owner || 'kieranpatton01').toLowerCase();
+    const repo = (ghConfig.repo || 'doodlebug').toLowerCase();
+    const lowerPath = pathname.toLowerCase();
+
+    if (hostname === `${owner}.github.io`) {
+      if (lowerPath.startsWith(`/${repo}/img/`)) {
+        const subPath = pathname.slice(repo.length + 1);
+        return safeImgFileRegex.test(subPath);
       }
-      if (hostname === `${projectId}.firebasestorage.app`) {
-        return true;
+      if (repo === `${owner}.github.io`) {
+        return safeImgFileRegex.test(pathname);
       }
       return false;
     }
 
-    // Generic Firebase Storage official hosts if FIREBASE_PROJECT_ID is not configured
-    if (
-      hostname === 'firebasestorage.googleapis.com' ||
-      hostname === 'storage.googleapis.com' ||
-      hostname.endsWith('.firebasestorage.app')
-    ) {
-      return true;
+    if (hostname === 'raw.githubusercontent.com') {
+      const prefix = `/${owner}/${repo}/`;
+      if (lowerPath.startsWith(prefix)) {
+        const rest = pathname.slice(prefix.length); // <branch>/img/<file>
+        const slashIdx = rest.indexOf('/');
+        if (slashIdx > 0) {
+          const branchAndSubPath = rest.slice(slashIdx);
+          return safeImgFileRegex.test(branchAndSubPath);
+        }
+      }
+      return false;
     }
 
     return false;
@@ -246,7 +302,12 @@ export default {
     }
 
     // Pre-auth rate limiting: max 60 requests per minute per IP or client to protect worker against unauthenticated floods
-    if (pathname === '/api/generate' || pathname === '/api/publish') {
+    if (
+      pathname === '/api/generate' ||
+      pathname === '/api/publish' ||
+      pathname === '/api/upload' ||
+      pathname === '/api/assist'
+    ) {
       const cfIp = request.headers.get('cf-connecting-ip');
       const xff = request.headers.get('x-forwarded-for');
       const clientIp = cfIp || (xff ? xff.split(',')[0].trim() : '') || request.headers.get('x-real-ip') || '';
@@ -349,7 +410,7 @@ export default {
         for (const imgUrl of body.imageUrls) {
           if (!isValidImageUrl(imgUrl, env)) {
             return jsonResponse(
-              { error: 'Invalid imageUrl in list: must be HTTPS and hosted on Firebase Storage or approved photo CDN' },
+              { error: 'Invalid imageUrl in list: must be HTTPS and hosted in the GitHub img/ folder or approved photo CDN' },
               400,
               env,
               {},
@@ -373,7 +434,7 @@ export default {
       }
     }
 
-    // 4. POST /api/publish - Commit approved HTML to canvas.html on GitHub
+    // 4. POST /api/publish - Commit approved HTML to canvas.html on GitHub (+ clean up unused img/ photos)
     if (pathname === '/api/publish') {
       if (method !== 'POST') {
         return jsonResponse({ error: 'Method not allowed' }, 405, env, {}, origin);
@@ -423,6 +484,8 @@ export default {
 
       try {
         const publishResult = await commitCanvasToGitHub(body, env);
+        // Best-effort cleanup of old/unused images in img/ not referenced by the newly published canvas.html
+        await cleanupUnusedGitHubImages(body.html, env).catch(() => {});
         return jsonResponse(publishResult, 200, env, {}, origin);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -430,7 +493,61 @@ export default {
       }
     }
 
-    // 5. POST /api/assist - AI Nerd Assist Canvas Layout Generator
+    // 5. POST /api/upload - Commit optimized raster photo into GitHub img/ folder
+    if (pathname === '/api/upload') {
+      if (method !== 'POST') {
+        return jsonResponse({ error: 'Method not allowed' }, 405, env, {}, origin);
+      }
+
+      const authResult = await verifyFirebaseToken(request.headers.get('Authorization'), env);
+      if (!authResult.valid) {
+        return jsonResponse(
+          { error: authResult.error || 'Unauthorized' },
+          authResult.statusCode || 401,
+          env,
+          {},
+          origin
+        );
+      }
+
+      const rateLimitKey = `upload:${authResult.uid || 'anon'}`;
+      const limitResult = checkRateLimit(rateLimitKey, 20, 60_000);
+      if (!limitResult.allowed) {
+        return jsonResponse(
+          { error: `Too many photo uploads. Please wait ${limitResult.retryAfterSeconds} seconds.` },
+          429,
+          env,
+          { 'Retry-After': String(limitResult.retryAfterSeconds) },
+          origin
+        );
+      }
+
+      let body: UploadRequest;
+      try {
+        body = (await request.json()) as UploadRequest;
+      } catch {
+        return jsonResponse({ error: 'Invalid JSON request body' }, 400, env, {}, origin);
+      }
+
+      if (!body.dataBase64 || typeof body.dataBase64 !== 'string') {
+        return jsonResponse({ error: 'Missing required field: dataBase64' }, 400, env, {}, origin);
+      }
+
+      const sniffed = sniffRasterMimeTypeFromBase64(body.dataBase64);
+      if (!sniffed.valid) {
+        return jsonResponse({ error: sniffed.error || 'Invalid image payload' }, 400, env, {}, origin);
+      }
+
+      try {
+        const uploadResult = await uploadImageToGitHub(body, env);
+        return jsonResponse(uploadResult, 200, env, {}, origin);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return jsonResponse({ error: `Photo upload failed: ${message}` }, 502, env, {}, origin);
+      }
+    }
+
+    // 6. POST /api/assist - AI Nerd Assist Canvas Layout Generator
     if (pathname === '/api/assist') {
       if (method !== 'POST') {
         return jsonResponse({ error: 'Method not allowed' }, 405, env, {}, origin);
@@ -479,7 +596,7 @@ export default {
       }
     }
 
-    // 6. Route Not Found
+    // 7. Route Not Found
     return jsonResponse(
       { error: `Route not found: ${method} ${pathname}` },
       404,

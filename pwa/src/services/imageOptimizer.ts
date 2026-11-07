@@ -1,14 +1,14 @@
 /**
  * Client-Side Image Pre-Flight Validation and Optimization Utility
  * 
- * Pre-validates files to match storage.rules constraints before network upload,
+ * Pre-validates files to match Worker & GitHub img/ upload constraints before network upload,
  * validates actual file content via magic number sniffing to reject disguised non-image files / SVGs,
  * and downscales heavy mobile camera photos (e.g. 10MB-25MB) on an HTML Canvas
- * into lightweight, high-DPI raster assets (~300KB-800KB) fitting within Firebase
- * Storage quotas (< 5MB) without requiring paid Cloud Functions / Blaze plans.
+ * into lightweight, high-DPI raster assets (~300KB-800KB) fitting within GitHub img/
+ * upload limits (< 5MB) with zero Firebase Storage or Blaze billing requirements.
  */
 
-export const MAX_STORAGE_FILE_SIZE = 5 * 1024 * 1024; // 5MB (Firebase Storage Rules limit)
+export const MAX_STORAGE_FILE_SIZE = 5 * 1024 * 1024; // 5MB (GitHub img/ upload limit)
 export const MAX_CLIENT_INPUT_SIZE = 30 * 1024 * 1024; // 30MB guardrail to prevent browser tab OOM
 export const MAX_IMAGE_DIMENSION = 1600; // 1600px max dimension: crisp Retina quality on doodle canvas
 export const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'] as const;

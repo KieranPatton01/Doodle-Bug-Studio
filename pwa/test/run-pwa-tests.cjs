@@ -175,8 +175,8 @@ async function runTestSuite() {
   const optimizerContent = fs.readFileSync(optimizerPath, 'utf8');
   const storageContent = fs.readFileSync(path.join(pwaDir, 'src', 'services', 'storageService.ts'), 'utf8');
   const modalContent = fs.readFileSync(path.join(pwaDir, 'src', 'components', 'StickerTrayModal.tsx'), 'utf8');
-  const storageRulesPath = path.resolve(pwaDir, '..', 'storage.rules');
-  const storageRulesContent = fs.existsSync(storageRulesPath) ? fs.readFileSync(storageRulesPath, 'utf8') : '';
+  const workerGithubPath = path.resolve(pwaDir, '..', 'worker', 'src', 'github.ts');
+  const workerGithubContent = fs.existsSync(workerGithubPath) ? fs.readFileSync(workerGithubPath, 'utf8') : '';
 
   let imageOptimizer;
   try {
@@ -614,22 +614,106 @@ async function runTestSuite() {
     assert.match(optimizerContent, /Cleans up canvas GPU memory/i, 'Must document canvas GPU memory cleanup');
   });
 
-  await test('storage.rules contract alignment: allowed types and 5MB quota match exactly between client and backend rules', () => {
-    if (storageRulesContent) {
-      assert.match(storageRulesContent, /5\s*\*\s*1024\s*\*\s*1024/, 'storage.rules must enforce 5MB limit');
-      assert.match(storageRulesContent, /image\/\(jpeg\|png\|webp\|gif\)/, 'storage.rules must enforce raster MIME types');
+  await test('GitHub img/ upload contract alignment: allowed raster types and 5MB quota match between client and Worker', () => {
+    if (workerGithubContent) {
+      assert.match(workerGithubContent, /5\s*\*\s*1024\s*\*\s*1024/, 'worker/src/github.ts must enforce 5MB limit');
+      assert.match(workerGithubContent, /sniffRasterMimeTypeFromBase64/, 'worker/src/github.ts must enforce magic-byte raster verification');
+      assert.match(workerGithubContent, /img\/\$\{safeFileName\}/, 'worker/src/github.ts must store uploaded photos in img/ directory');
     }
-    assert.match(optimizerContent, /5\s*\*\s*1024\s*\*\s*1024/, 'imageOptimizer must match 5MB storage quota');
-    assert.match(optimizerContent, /'image\/jpeg',\s*'image\/png',\s*'image\/webp',\s*'image\/gif'/, 'imageOptimizer must match allowed formats');
+    assert.match(optimizerContent, /5\s*\*\s*1024\s*\*\s*1024/, 'imageOptimizer must match 5MB upload quota');
+    assert.match(optimizerContent, /'image\/jpeg',\s*'image\/png',\s*'image\/webp',\s*'image\/gif'/, 'imageOptimizer must match allowed raster formats');
   });
 
-  await test('storageService executes pre-flight validation, content validation, and fallback metadata before uploadBytes', () => {
+  await test('storageService executes pre-flight validation, content validation, and uploads via Worker to GitHub img/ without firebase/storage', async () => {
+    assert.strictEqual(storageContent.includes('firebase/storage'), false, 'storageService must not import firebase/storage');
     assert.match(storageContent, /validateImageFile\(file\)/, 'storageService must run pre-flight validation');
     assert.match(storageContent, /validateImageContent\(file\)/, 'storageService must run content verification');
     assert.match(storageContent, /optimizeImageForUpload\(file/, 'storageService must optimize image before upload');
-    assert.match(storageContent, /optimizedFile\.size > MAX_STORAGE_FILE_SIZE/, 'storageService must guard 5MB limit prior to uploadBytes');
-    assert.match(storageContent, /contentType/, 'storageService must specify contentType in metadata');
-    assert.match(storageContent, /uploadBytes\(storageRef,\s*optimizedFile/, 'storageService must upload the optimized file');
+    assert.match(storageContent, /optimizedFile\.size > MAX_STORAGE_FILE_SIZE/, 'storageService must guard 5MB limit prior to upload');
+    assert.match(storageContent, /callUploadPhotoApi/, 'storageService must upload photo via Cloudflare Worker to GitHub img/');
+    assert.match(storageContent, /localPhotoPreviewCache/, 'storageService must cache local preview URL for instant canvas rendering');
+
+    // Behavioral execution of storageService.uploadPhotoToGitHub and resolveLocalPhotoPreview
+    const ts = require('typescript');
+    const transpiledStorage = ts.transpileModule(storageContent, {
+      compilerOptions: {
+        module: ts.ModuleKind.CommonJS,
+        target: ts.ScriptTarget.ES2020,
+      },
+    });
+    let capturedUploadPayload = null;
+    const mockAuthState = {
+      currentUser: {
+        getIdToken: async () => 'mock-firebase-id-token',
+      },
+    };
+    const storageMod = { exports: {} };
+    const customRequire = (id) => {
+      if (id === '../config/firebase') {
+        return { getFirebaseAuth: () => mockAuthState };
+      }
+      if (id === './workerClient') {
+        return {
+          callUploadPhotoApi: async (params) => {
+            capturedUploadPayload = params;
+            return {
+              success: true,
+              url: 'https://islacowper.co.uk/img/photo_171000_abc123.gif',
+              path: 'img/photo_171000_abc123.gif',
+              commitSha: 'sha-123',
+            };
+          },
+        };
+      }
+      if (id === './imageOptimizer') {
+        return imageOptimizer;
+      }
+      return require(id);
+    };
+    const storageFn = new Function('exports', 'module', 'require', transpiledStorage.outputText);
+    storageFn(storageMod.exports, storageMod, customRequire);
+
+    const { uploadPhotoToGitHub, resolveLocalPhotoPreview, injectLocalPhotoPreviewsIntoHtml } = storageMod.exports;
+
+    // Test animated GIF upload path (bypasses canvas rasterizer, exercises validateImageFile + validateImageContent + blobToDataUrl + callUploadPhotoApi + localPhotoPreviewCache)
+    const gifBytes = new Uint8Array([
+      0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x01, 0x00, 0x01, 0x00, 0x80, 0x00, 0x00,
+      0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x21, 0xf9, 0x04, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x2c, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x02, 0x02,
+      0x44, 0x01, 0x00, 0x21, 0xf9, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x2c, 0x00,
+      0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x02, 0x02, 0x44, 0x01, 0x00, 0x3b
+    ]);
+    const gifFile = new File([gifBytes], 'party.gif', { type: 'image/gif' });
+    const uploadedUrl = await uploadPhotoToGitHub(gifFile);
+    assert.strictEqual(uploadedUrl, 'https://islacowper.co.uk/img/photo_171000_abc123.gif');
+    assert.ok(capturedUploadPayload, 'Must invoke callUploadPhotoApi');
+    assert.strictEqual(capturedUploadPayload.idToken, 'mock-firebase-id-token');
+    assert.strictEqual(capturedUploadPayload.mimeType, 'image/gif');
+    assert.ok(capturedUploadPayload.dataBase64.startsWith('data:image/gif;base64,'), 'Must pass base64 data URL to Worker');
+
+    // Verify resolveLocalPhotoPreview returns cached data URL for uploaded URL and passes through uncached URLs
+    const previewUrl = resolveLocalPhotoPreview(uploadedUrl);
+    assert.ok(previewUrl.startsWith('data:image/gif;base64,'), 'resolveLocalPhotoPreview must return cached local data URL');
+    assert.strictEqual(
+      resolveLocalPhotoPreview('https://islacowper.co.uk/img/other.jpg'),
+      'https://islacowper.co.uk/img/other.jpg',
+      'resolveLocalPhotoPreview must return original URL when not in cache'
+    );
+
+    // Verify injectLocalPhotoPreviewsIntoHtml substitutes cached data URL into generated HTML for PreviewModal iframe
+    const generatedHtml = `<!DOCTYPE html><html><body><img src="${uploadedUrl}"><img src="/img/photo_171000_abc123.gif"></body></html>`;
+    const previewInjectedHtml = injectLocalPhotoPreviewsIntoHtml(generatedHtml);
+    assert.strictEqual(previewInjectedHtml.includes(uploadedUrl), false, 'Preview HTML must replace canonical URL with cached data URL');
+    assert.strictEqual(previewInjectedHtml.includes('"/img/photo_171000_abc123.gif"'), false, 'Preview HTML must replace relative /img/ URL with cached data URL');
+    assert.strictEqual(previewInjectedHtml.includes(previewUrl), true, 'Preview HTML must contain cached data URL');
+    assert.match(previewModalContent, /injectLocalPhotoPreviewsIntoHtml\(result\.html\)/, 'PreviewModal must inject local photo previews into iframe srcDoc');
+
+    // Verify unauthenticated upload throws descriptive error
+    mockAuthState.currentUser = null;
+    await assert.rejects(
+      async () => uploadPhotoToGitHub(gifFile),
+      /Please sign in first to upload photos/
+    );
   });
 
   await test('StickerTrayModal validates immediately upon file selection and displays optimization status', () => {

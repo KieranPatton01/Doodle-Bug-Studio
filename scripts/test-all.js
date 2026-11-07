@@ -192,12 +192,13 @@ check('Worker HTML validation behaviorally rejects unclosed scripts, unquoted sr
   assert.strictEqual(liveCanvasValidation.valid, true, `live-site/canvas.html must pass validator: ${liveCanvasValidation.error}`);
 });
 
-check('Worker image validation behaviorally enforces https and configured Firebase Storage host', () => {
-  const env = { FIREBASE_PROJECT_ID: 'lily-project' };
-  assert.strictEqual(isValidImageUrl('https://firebasestorage.googleapis.com/v0/b/lily-project.appspot.com/o/pic.jpg', env), true);
+check('Worker image validation behaviorally enforces https and configured GitHub img/ host while rejecting Firebase Storage', () => {
+  const env = { GITHUB_OWNER: 'KieranPatton01', GITHUB_REPO: 'DoodleBug', PUBLIC_SITE_URL: 'https://islacowper.co.uk' };
+  assert.strictEqual(isValidImageUrl('https://islacowper.co.uk/img/pic.jpg', env), true);
+  assert.strictEqual(isValidImageUrl('https://kieranpatton01.github.io/DoodleBug/img/pic.png', env), true);
   assert.strictEqual(isValidImageUrl('https://images.unsplash.com/photo-123', env), true);
-  assert.strictEqual(isValidImageUrl('https://firebasestorage.googleapis.com/v0/b/foreign-hacker.appspot.com/o/pic.jpg', env), false);
-  assert.strictEqual(isValidImageUrl('http://firebasestorage.googleapis.com/v0/b/lily-project.appspot.com/o/pic.jpg', env), false);
+  assert.strictEqual(isValidImageUrl('https://firebasestorage.googleapis.com/v0/b/lily-project.appspot.com/o/pic.jpg', env), false);
+  assert.strictEqual(isValidImageUrl('http://islacowper.co.uk/img/pic.jpg', env), false);
   assert.strictEqual(isValidImageUrl('https://evil-site.com/pic.jpg', env), false);
 });
 
@@ -231,7 +232,7 @@ check('Worker GitHub config parses both JSON string and individual env vars', ()
   assert.strictEqual(cfg2.repo, 'david-site');
 });
 
-check('Worker comprehensive unit & contract test suite passes all 47 tests', () => {
+check('Worker comprehensive unit & contract test suite passes all tests', () => {
   const testOutput = execSync('node test/run-tests.js', { cwd: workerDir, stdio: 'pipe' }).toString();
   assert.match(testOutput, /TEST RESULTS: \d+\/\d+ PASSED \(0 FAILED\)/, 'All worker tests must pass');
 });
@@ -245,36 +246,39 @@ check('Gemini configuration keeps gemini-3.8-flash as primary and thinkingLevel 
 });
 
 // ----------------------------------------------------
-// 4. FIREBASE DEPLOYMENT & STORAGE SECURITY AUDIT
+// 4. FREE SPARK TIER & GITHUB IMG/ STORAGE AUDIT
 // ----------------------------------------------------
-console.log('\n--- 4. Firebase Storage & Rules Security Audit ---');
+console.log('\n--- 4. Free Spark Tier & GitHub img/ Storage Security Audit ---');
 
-check('firebase.json exists and links storage.rules', () => {
+check('firebase.json and PWA source have zero Firebase Storage dependencies (Spark Free Tier safe)', () => {
   const fbJson = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'firebase.json'), 'utf8'));
-  assert.strictEqual(fbJson.storage.rules, 'storage.rules');
+  assert.strictEqual(fbJson.storage, undefined, 'firebase.json must not configure paid Firebase Storage');
+  const fbConfig = fs.readFileSync(path.join(__dirname, '..', 'pwa', 'src', 'config', 'firebase.ts'), 'utf8');
+  assert.strictEqual(fbConfig.includes('firebase/storage'), false, 'pwa/src/config/firebase.ts must not import firebase/storage');
 });
 
-check('storage.rules restricts uploads to raster images and drops SVG scripts', () => {
-  const rules = fs.readFileSync(path.join(__dirname, '..', 'storage.rules'), 'utf8');
-  assert.match(rules, /image\/\(jpeg\|png\|webp\|gif\)/, 'Must only allow safe raster images');
-  assert.strictEqual(rules.includes('svg+xml'), false, 'Must drop SVG to prevent embedded script attacks');
+check('Worker GitHub img/ uploader restricts uploads to raster images via magic bytes and rejects SVGs', () => {
+  const githubSrc = fs.readFileSync(path.join(__dirname, '..', 'worker', 'src', 'github.ts'), 'utf8');
+  assert.match(githubSrc, /sniffRasterMimeTypeFromBase64/, 'Must validate binary magic bytes');
+  assert.match(githubSrc, /svg/i, 'Must explicitly guard against SVG uploads');
+  assert.match(githubSrc, /cleanupUnusedGitHubImages/, 'Must clean up unused images from img/ folder');
 });
 
-check('storage.rules splits allow create and allow delete so delete does not evaluate request.resource', () => {
-  const rules = fs.readFileSync(path.join(__dirname, '..', 'storage.rules'), 'utf8');
-  assert.match(rules, /allow create:\s*if request\.auth != null/, 'Must have allow create');
-  assert.match(rules, /allow delete:\s*if request\.auth != null/, 'Must have allow delete');
-  assert.strictEqual(rules.includes('allow write:'), false, 'allow write must be split into create and delete');
+check('img/ directory exists in root and live-site and is preserved by deploy-live-repo.js', () => {
+  assert.strictEqual(fs.existsSync(path.join(__dirname, '..', 'img', '.gitkeep')), true, 'Root img/.gitkeep must exist');
+  assert.strictEqual(fs.existsSync(path.join(__dirname, '..', 'live-site', 'img', '.gitkeep')), true, 'live-site/img/.gitkeep must exist');
+  const deployScript = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'deploy-live-repo.js'), 'utf8');
+  assert.match(deployScript, /git checkout origin\/main -- img/, 'deploy-live-repo.js must preserve uploaded img/ files from origin/main');
 });
 
-check('setup-keys scripts target regex request.auth.uid and write worker/.dev.vars', () => {
+check('setup-keys scripts write worker/.dev.vars and pwa/.env without Firebase Storage or leaked keys', () => {
   const ps1 = fs.readFileSync(path.join(__dirname, '..', 'setup-keys.ps1'), 'utf8');
-  assert.match(ps1, /request\\\.auth\\\.uid == '\.\*\?'/, 'PowerShell script must match request.auth.uid regex');
   assert.match(ps1, /worker\\\.dev\.vars/, 'PowerShell script must write worker/.dev.vars');
+  assert.strictEqual(ps1.includes('VITE_FIREBASE_STORAGE_BUCKET'), false, 'PowerShell script must not include VITE_FIREBASE_STORAGE_BUCKET');
 
   const bat = fs.readFileSync(path.join(__dirname, '..', 'setup-keys.bat'), 'utf8');
-  assert.match(bat, /request\\\.auth\\\.uid == '\.\*\?'/, 'Batch script must match request.auth.uid regex');
   assert.match(bat, /worker\\\.dev\.vars/, 'Batch script must write worker/.dev.vars');
+  assert.strictEqual(bat.includes('VITE_FIREBASE_STORAGE_BUCKET'), false, 'Batch script must not include VITE_FIREBASE_STORAGE_BUCKET');
   assert.strictEqual(/AIzaSy[a-zA-Z0-9_-]{33}/.test(bat), false, 'Batch script must not contain Google API key patterns');
   assert.strictEqual(/DEFAULT_UID=[a-zA-Z0-9]{28}/.test(bat), false, 'Batch script must not contain default UID patterns');
 });
@@ -328,7 +332,7 @@ check('PWA Canvas note and sticker buttons stop pointer propagation to avoid dra
 check('PWA PreviewModal implements sandboxed iframe within 2-second review flow', () => {
   const modalTsx = fs.readFileSync(path.join(__dirname, '..', 'pwa', 'src', 'components', 'PreviewModal.tsx'), 'utf8');
   assert.match(modalTsx, /<iframe/);
-  assert.match(modalTsx, /srcDoc=\{result\.html\}/);
+  assert.match(modalTsx, /srcDoc=\{(?:injectLocalPhotoPreviewsIntoHtml\()?result\.html\)?\}/);
   assert.match(modalTsx, /Publish to Live Site/);
 });
 

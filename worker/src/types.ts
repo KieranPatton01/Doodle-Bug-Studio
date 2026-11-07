@@ -26,6 +26,7 @@ export interface Env {
   GITHUB_CANVAS_PATH?: string;
   GITHUB_COMMITTER_NAME?: string;
   GITHUB_COMMITTER_EMAIL?: string;
+  PUBLIC_SITE_URL?: string;
 
   CORS_ORIGIN?: string;
   NODE_ENV?: string;
@@ -36,7 +37,7 @@ export interface Env {
 export interface GenerateRequest {
   /** Canvas snapshot: either data URL (data:image/png;base64,...) or raw Base64 */
   snapshotBase64: string;
-  /** Optional array of permanent photo download URLs uploaded to Firebase Storage */
+  /** Optional array of permanent photo URLs hosted in the GitHub img/ folder or approved CDNs */
   imageUrls?: string[];
   /** Optional handwritten notes or prompt instructions */
   notes?: string;
@@ -64,6 +65,22 @@ export interface PublishResponse {
   htmlUrl: string;
   path: string;
   branch: string;
+}
+
+export interface UploadRequest {
+  /** Base64-encoded raster image payload (data URL or raw Base64) */
+  dataBase64: string;
+  /** Optional MIME type hint (validated against actual binary magic bytes) */
+  mimeType?: string;
+  /** Optional file name (sanitized and placed in img/) */
+  fileName?: string;
+}
+
+export interface UploadResponse {
+  success: boolean;
+  url: string;
+  path: string;
+  commitSha: string;
 }
 
 export interface AssistRequest {

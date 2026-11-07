@@ -11,6 +11,7 @@ import {
   Loader2 
 } from 'lucide-react';
 import { GenerateResult, PublishResult } from '../types';
+import { injectLocalPhotoPreviewsIntoHtml } from '../services/storageService';
 
 interface PreviewModalProps {
   isOpen: boolean;
@@ -155,7 +156,7 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({
           {activeTab === 'preview' ? (
             <div className="w-full max-w-[390px] h-full bg-white rounded-2xl border border-stone-300 shadow-sm overflow-hidden transition-all duration-300 flex flex-col">
               <iframe
-                srcDoc={result.html}
+                srcDoc={injectLocalPhotoPreviewsIntoHtml(result.html)}
                 title="Sandboxed Component Stage"
                 className="w-full h-full border-none bg-white"
                 sandbox="allow-scripts allow-modals allow-popups"

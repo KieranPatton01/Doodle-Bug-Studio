@@ -83,28 +83,22 @@ echo =====================================================================
 echo Writing pwa\.env ...
 (
 echo # Doodlebug PWA Client Environment Configuration
-echo # All values here are public client identifiers scoped to Auth and Storage rules.
+echo # All values here are public client identifiers scoped strictly to Firebase Auth.
 echo # ZERO CLIENT SECRETS RULE: No GitHub PAT or Gemini Keys are stored here.
 echo.
 echo VITE_FIREBASE_API_KEY=%FIREBASE_API_KEY%
 echo VITE_FIREBASE_AUTH_DOMAIN=%FIREBASE_PROJECT_ID%.firebaseapp.com
 echo VITE_FIREBASE_PROJECT_ID=%FIREBASE_PROJECT_ID%
-echo VITE_FIREBASE_STORAGE_BUCKET=%FIREBASE_PROJECT_ID%.firebasestorage.app
 echo VITE_WORKER_URL=%WORKER_URL%
 ) > "%~dp0pwa\.env"
 echo   [OK] pwa\.env generated successfully.
 
-:: STEP 2: Update storage.rules with real UID
-echo Updating storage.rules with real Firebase UID...
-powershell -NoProfile -Command "$c = Get-Content '%~dp0storage.rules' -Raw; $c = $c -replace \"request\.auth\.uid == '.*?'\", \"request.auth.uid == '%ALLOWED_FIREBASE_UID%'\"; $c = $c -replace 'YOUR_ALLOWED_FIREBASE_UID_HERE', '%ALLOWED_FIREBASE_UID%'; $c = $c -replace '<ALLOWED_FIREBASE_UID>', '%ALLOWED_FIREBASE_UID%'; Set-Content '%~dp0storage.rules' -Value $c -Encoding UTF8"
-echo   [OK] storage.rules updated.
-
-:: STEP 3: Update worker/wrangler.toml with owner and repo
+:: STEP 2: Update worker/wrangler.toml with owner and repo
 echo Updating worker\wrangler.toml with GitHub owner and repo...
 powershell -NoProfile -Command "$c = Get-Content '%~dp0worker\wrangler.toml' -Raw; $c = $c -replace 'GITHUB_OWNER\s*=\s*\".*?\"', 'GITHUB_OWNER = \"%GITHUB_OWNER%\"'; $c = $c -replace 'GITHUB_REPO\s*=\s*\".*?\"', 'GITHUB_REPO = \"%GITHUB_REPO%\"'; Set-Content '%~dp0worker\wrangler.toml' -Value $c -Encoding UTF8"
 echo   [OK] worker\wrangler.toml updated.
 
-:: STEP 4: Write worker\.dev.vars
+:: STEP 3: Write worker\.dev.vars
 echo Writing worker\.dev.vars ...
 (
 echo # Doodlebug Cloudflare Worker Local Development Variables
@@ -142,10 +136,7 @@ echo                      SETUP COMPLETE!
 echo =====================================================================
 echo.
 echo Summary of next steps:
-echo 1. Deploy Firebase Storage security rules:
-echo      firebase deploy --only storage
-echo.
-echo 2. Start the local PWA editor to test:
+echo Start the local PWA editor to test:
 echo      cd pwa
 echo      npm run dev
 echo =====================================================================

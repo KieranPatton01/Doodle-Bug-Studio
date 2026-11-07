@@ -1,20 +1,19 @@
 /**
- * Firebase Client SDK Initialization (Auth & Storage)
+ * Firebase Client SDK Initialization (Authentication Only - Free Spark Tier)
  * 
  * ZERO CLIENT SECRETS RULE:
  * This client contains NO GitHub PATs and NO Gemini API keys.
- * Firebase client config identifiers are public keys scoped to Auth and Storage rules.
+ * Firebase client config identifiers are public keys scoped strictly to Firebase Authentication.
+ * Photos are uploaded to the GitHub img/ folder via the Cloudflare Worker.
  */
 
 import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
 import { getAuth, Auth, GoogleAuthProvider } from 'firebase/auth';
-import { getStorage, FirebaseStorage } from 'firebase/storage';
 
 export interface FirebaseClientConfig {
   apiKey: string;
   authDomain: string;
   projectId: string;
-  storageBucket: string;
   messagingSenderId: string;
   appId: string;
 }
@@ -52,7 +51,6 @@ export function getFirebaseConfig(): FirebaseClientConfig | null {
     apiKey: envKey,
     authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || `${envProj}.firebaseapp.com`,
     projectId: envProj,
-    storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || `${envProj}.appspot.com`,
     messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '',
     appId: import.meta.env.VITE_FIREBASE_APP_ID || '',
   };
@@ -64,13 +62,12 @@ export function isFirebaseConfigured(): boolean {
 
 let app: FirebaseApp | null = null;
 let auth: Auth | null = null;
-let storage: FirebaseStorage | null = null;
 
 export function initFirebase(customConfig?: FirebaseClientConfig) {
   const config = customConfig || getFirebaseConfig();
   if (!config) {
     // Unconfigured: do not initialize Firebase with fake credentials that fail confusingly
-    return { app: null, auth: null, storage: null, googleProvider: null };
+    return { app: null, auth: null, googleProvider: null };
   }
 
   try {
@@ -80,22 +77,16 @@ export function initFirebase(customConfig?: FirebaseClientConfig) {
       app = getApp();
     }
     auth = getAuth(app);
-    storage = getStorage(app);
-    return { app, auth, storage, googleProvider: new GoogleAuthProvider() };
+    return { app, auth, googleProvider: new GoogleAuthProvider() };
   } catch (err) {
     console.error('Firebase initialization error:', err);
-    return { app: null, auth: null, storage: null, googleProvider: null };
+    return { app: null, auth: null, googleProvider: null };
   }
 }
 
 export function getFirebaseAuth(): Auth | null {
   if (!auth) initFirebase();
   return auth;
-}
-
-export function getFirebaseStorage(): FirebaseStorage | null {
-  if (!storage) initFirebase();
-  return storage;
 }
 
 export function saveFirebaseConfig(config: FirebaseClientConfig) {
@@ -108,5 +99,4 @@ export function clearFirebaseConfig() {
   localStorage.removeItem('doodlebug_firebase_config');
   app = null;
   auth = null;
-  storage = null;
 }

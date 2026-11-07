@@ -8,8 +8,8 @@ Write-Host "This script runs 100% locally on your computer."
 Write-Host "None of your keys will leave your PC or appear in chat." -ForegroundColor Green
 Write-Host ""
 Write-Host "Presets detected from your Firebase setup:"
-Write-Host "  Project ID:     doodlebug-ddc9c"
-Write-Host "  Storage Bucket: doodlebug-ddc9c.firebasestorage.app"
+Write-Host "  Project ID:     doodlebug-ddc9c (Free Spark Plan - Auth Only)"
+Write-Host "  Photo Storage:  GitHub img/ folder"
 Write-Host "=====================================================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -65,24 +65,12 @@ $envContent = @"
 VITE_FIREBASE_API_KEY=$firebaseApiKey
 VITE_FIREBASE_AUTH_DOMAIN=$projectId.firebaseapp.com
 VITE_FIREBASE_PROJECT_ID=$projectId
-VITE_FIREBASE_STORAGE_BUCKET=$projectId.firebasestorage.app
 VITE_WORKER_URL=$workerUrl
 "@
 Set-Content -Path $envPath -Value $envContent -Encoding UTF8
 Write-Host "  [OK] pwa/.env written." -ForegroundColor Green
 
-# 2. Update storage.rules
-$rulesPath = Join-Path $baseDir "storage.rules"
-if (Test-Path $rulesPath) {
-    $rulesContent = Get-Content $rulesPath -Raw
-    $rulesContent = $rulesContent -replace "request\.auth\.uid == '.*?'", "request.auth.uid == '$allowedUid'"
-    $rulesContent = $rulesContent -replace "YOUR_ALLOWED_FIREBASE_UID_HERE", $allowedUid
-    $rulesContent = $rulesContent -replace "<ALLOWED_FIREBASE_UID>", $allowedUid
-    Set-Content -Path $rulesPath -Value $rulesContent -Encoding UTF8
-    Write-Host "  [OK] storage.rules updated with allowed UID." -ForegroundColor Green
-}
-
-# 3. Update worker/wrangler.toml
+# 2. Update worker/wrangler.toml
 $wranglerPath = Join-Path $baseDir "worker\wrangler.toml"
 if (Test-Path $wranglerPath) {
     $wranglerContent = Get-Content $wranglerPath -Raw
@@ -92,7 +80,7 @@ if (Test-Path $wranglerPath) {
     Write-Host "  [OK] worker/wrangler.toml updated." -ForegroundColor Green
 }
 
-# 4. Write worker/.dev.vars for local development
+# 3. Write worker/.dev.vars for local development
 $devVarsPath = Join-Path $baseDir "worker\.dev.vars"
 $devVarsContent = @"
 # Doodlebug Cloudflare Worker Local Development Variables
@@ -128,8 +116,6 @@ if ($pushSecrets -match "^[Yy]") {
 Write-Host ""
 Write-Host "=====================================================================" -ForegroundColor Cyan
 Write-Host "SETUP COMPLETE!" -ForegroundColor Yellow
-Write-Host "1. Deploy your Firebase storage rules:"
-Write-Host "   firebase deploy --only storage" -ForegroundColor White
-Write-Host "2. Start your local PWA to test:"
+Write-Host "Start your local PWA to test:"
 Write-Host "   cd pwa; npm run dev" -ForegroundColor White
 Write-Host "=====================================================================" -ForegroundColor Cyan
