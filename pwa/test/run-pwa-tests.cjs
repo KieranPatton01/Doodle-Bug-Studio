@@ -645,9 +645,10 @@ async function runTestSuite() {
     assert.strictEqual(modalContent.includes('label: file.name'), false, 'Must not leak file.name in sticker label');
   });
 
-  await test('Header and PreviewModal remove settings gear button, Sparkles icon, and nerd pink pills', () => {
-    assert.strictEqual(headerContent.includes('onOpenSettings'), false, 'Header must not include Settings button');
-    assert.strictEqual(headerContent.includes('<Settings'), false, 'Header must not render Settings icon');
+  await test('Header and PreviewModal remove Sparkles icon, VIP Ready label, and nerd pink pills', () => {
+    assert.strictEqual(headerContent.includes('onOpenSettings'), false, 'Header must not include legacy onOpenSettings prop');
+    assert.strictEqual(headerContent.includes('VIP Ready'), false, 'Header must replace VIP Ready label with Settings icon');
+    assert.match(headerContent, /<Settings/, 'Header must render Settings icon for Auth/Account button');
     assert.strictEqual(headerContent.includes('<Sparkles'), false, 'Header generate webpage button must not include Sparkles icon');
     assert.strictEqual(headerContent.includes('built by your nerd'), false, 'Header must not include built by your nerd pink pill');
     assert.strictEqual(previewModalContent.includes('Coded by your nerd'), false, 'PreviewModal must not include Coded by your nerd pink pill');

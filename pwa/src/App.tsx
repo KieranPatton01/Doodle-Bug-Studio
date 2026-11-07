@@ -50,6 +50,7 @@ export const App: React.FC = () => {
   const [isPublishing, setIsPublishing] = useState(false);
   const [publishResult, setPublishResult] = useState<PublishResult | null>(null);
   const [errorNotification, setErrorNotification] = useState<string | null>(null);
+  const lastGeneratedSignatureRef = useRef<string | null>(null);
 
   // Auth state
   const [authState, setAuthState] = useState<AuthState>({
@@ -177,9 +178,6 @@ export const App: React.FC = () => {
 
     if (!canvasRef.current) return;
 
-    setIsGenerating(true);
-    setPublishResult(null);
-
     try {
       const snapshotBase64 = await canvasRef.current.exportSnapshot();
       const imageUrls = Array.from(
@@ -198,6 +196,23 @@ export const App: React.FC = () => {
       }
       const notes = noteLines.join('\n').slice(0, 4000);
 
+      // Fingerprint the canvas state so we don't burn Gemini tokens if nothing changed
+      const canvasSignature = JSON.stringify({
+        snapshotBase64,
+        imageUrls,
+        notes,
+        textNotes,
+        stickers,
+      });
+
+      if (generateResult && lastGeneratedSignatureRef.current === canvasSignature) {
+        setIsPreviewModalOpen(true);
+        return;
+      }
+
+      setIsGenerating(true);
+      setPublishResult(null);
+
       const result = await callGenerateApi({
         snapshotBase64,
         imageUrls,
@@ -205,6 +220,7 @@ export const App: React.FC = () => {
         idToken: currentToken,
       });
 
+      lastGeneratedSignatureRef.current = canvasSignature;
       setGenerateResult(result);
       setIsPreviewModalOpen(true);
     } catch (err) {

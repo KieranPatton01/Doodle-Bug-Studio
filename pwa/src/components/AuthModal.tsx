@@ -1,12 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, Lock, LogIn, LogOut, CheckCircle, AlertCircle } from 'lucide-react';
 import { 
   signInWithEmailAndPassword, 
-  signInWithPopup, 
   signOut,
   UserCredential
 } from 'firebase/auth';
-import { getFirebaseAuth, initFirebase } from '../config/firebase';
+import { getFirebaseAuth } from '../config/firebase';
 import { AuthState } from '../types';
 
 interface AuthModalProps {
@@ -16,6 +15,11 @@ interface AuthModalProps {
   onUpdateAuthState: (state: AuthState) => void;
   isLockedGate?: boolean;
 }
+
+const LOCKOUT_STORAGE_KEY = 'doodlebug_login_lockout_until';
+const ATTEMPTS_STORAGE_KEY = 'doodlebug_login_failed_attempts';
+const MAX_FAILED_ATTEMPTS = 5;
+const LOCKOUT_DURATION_MS = 60_000; // 60 seconds cooldown after 5 failed attempts
 
 export const AuthModal: React.FC<AuthModalProps> = ({
   isOpen,
@@ -28,11 +32,42 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [cooldownSeconds, setCooldownSeconds] = useState<number>(0);
+
+  // Sync cooldown timer from localStorage
+  useEffect(() => {
+    const checkCooldown = () => {
+      try {
+        const untilRaw = localStorage.getItem(LOCKOUT_STORAGE_KEY);
+        if (!untilRaw) {
+          setCooldownSeconds(0);
+          return;
+        }
+        const until = parseInt(untilRaw, 10);
+        const remaining = Math.ceil((until - Date.now()) / 1000);
+        if (remaining > 0) {
+          setCooldownSeconds(remaining);
+        } else {
+          localStorage.removeItem(LOCKOUT_STORAGE_KEY);
+          localStorage.removeItem(ATTEMPTS_STORAGE_KEY);
+          setCooldownSeconds(0);
+        }
+      } catch {
+        setCooldownSeconds(0);
+      }
+    };
+
+    checkCooldown();
+    const interval = setInterval(checkCooldown, 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   if (!isOpen) return null;
 
   const handleEmailSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (cooldownSeconds > 0) return;
+
     setIsLoading(true);
     setError(null);
 
@@ -46,6 +81,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     try {
       const userCredential: UserCredential = await signInWithEmailAndPassword(auth, email, password);
       const idToken = await userCredential.user.getIdToken();
+      try {
+        localStorage.removeItem(LOCKOUT_STORAGE_KEY);
+        localStorage.removeItem(ATTEMPTS_STORAGE_KEY);
+      } catch {
+        // ignore storage errors
+      }
       onUpdateAuthState({
         isAuthenticated: true,
         user: {
@@ -57,40 +98,27 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       });
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Sign in failed');
-    } finally {
-      setIsLoading(false);
-    }
-  };
+      let friendlyMsg = 'Incorrect email or password. Please try again.';
+      const rawMsg = err instanceof Error ? err.message : String(err);
 
-  const handleGoogleSignIn = async () => {
-    setIsLoading(true);
-    setError(null);
+      if (rawMsg.includes('auth/too-many-requests')) {
+        friendlyMsg = 'Too many failed login attempts! Firebase has temporarily locked sign-in for your protection. Please wait a few minutes.';
+      }
 
-    const auth = getFirebaseAuth();
-    if (!auth) {
-      setError('Firebase Auth client is not initialized');
-      setIsLoading(false);
-      return;
-    }
+      try {
+        const prevAttempts = parseInt(localStorage.getItem(ATTEMPTS_STORAGE_KEY) || '0', 10) + 1;
+        localStorage.setItem(ATTEMPTS_STORAGE_KEY, String(prevAttempts));
+        if (prevAttempts >= MAX_FAILED_ATTEMPTS) {
+          const until = Date.now() + LOCKOUT_DURATION_MS;
+          localStorage.setItem(LOCKOUT_STORAGE_KEY, String(until));
+          setCooldownSeconds(Math.ceil(LOCKOUT_DURATION_MS / 1000));
+          friendlyMsg = 'Too many attempts! Please wait 60 seconds before trying again.';
+        }
+      } catch {
+        // ignore storage errors
+      }
 
-    try {
-      const { googleProvider } = initFirebase();
-      if (!googleProvider) throw new Error('Google Provider not available');
-      const result = await signInWithPopup(auth, googleProvider);
-      const idToken = await result.user.getIdToken();
-      onUpdateAuthState({
-        isAuthenticated: true,
-        user: {
-          uid: result.user.uid,
-          email: result.user.email,
-          displayName: result.user.displayName,
-        },
-        idToken,
-      });
-      onClose();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Google sign-in failed');
+      setError(friendlyMsg);
     } finally {
       setIsLoading(false);
     }
@@ -120,30 +148,34 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           : 'bg-black/40 backdrop-blur-xs'
       }`}
     >
-      <div className="bg-white rounded-3xl border border-stone-200 shadow-retro max-w-sm w-full p-5 space-y-4">
+      <div className="bg-white rounded-3xl border-2 border-stone-200 shadow-retro max-w-sm w-full p-6 sm:p-7 space-y-5 relative overflow-hidden">
         
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Lock className="w-5 h-5 text-slate-800" />
-            <h3 className="font-extrabold text-slate-900 text-base">
-              {isLockedGate && !authState.isAuthenticated
-                ? '🐛 Doodlebug Studio 💖'
-                : 'VIP Creator Access 💖'}
-            </h3>
-          </div>
-          {(!isLockedGate || authState.isAuthenticated) && (
-            <button onClick={onClose} className="p-1 rounded-xl hover:bg-stone-100 text-slate-500">
-              <X className="w-4 h-4" />
-            </button>
-          )}
-        </div>
+        {/* Subtle top close button when opened as account modal */}
+        {(!isLockedGate || authState.isAuthenticated) && (
+          <button
+            onClick={onClose}
+            className="absolute top-4 right-4 p-1.5 rounded-xl hover:bg-stone-100 text-slate-400 hover:text-slate-600 transition-colors"
+            title="Close"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        )}
 
-        <p className="text-xs text-slate-500">
-          {isLockedGate && !authState.isAuthenticated
-            ? 'Welcome to your private studio! Sign in once so your nerd knows it is really you before unlocking your canvas and photo tray.'
-            : "Sign in so your nerd knows it's really you before publishing your website to the world!"}
-        </p>
+        {/* Cute Centered Header */}
+        <div className="text-center space-y-2 pt-1">
+          <div className="w-14 h-14 mx-auto rounded-2xl bg-pink-50 border-2 border-pink-200 shadow-retro-sm flex items-center justify-center text-2xl">
+            🐛
+          </div>
+          <h3 className="font-extrabold text-slate-900 text-lg tracking-tight flex items-center justify-center gap-1.5">
+            <span>Doodlebug Studio</span>
+            <span>💖</span>
+          </h3>
+          <p className="text-xs text-slate-500 leading-relaxed max-w-[260px] mx-auto">
+            {authState.isAuthenticated
+              ? 'Your private studio is unlocked and ready to doodle!'
+              : 'Sign in to unlock your private drawing canvas and photo scrapbook.'}
+          </p>
+        </div>
 
         {authState.isAuthenticated ? (
           /* Signed In State */
@@ -153,75 +185,82 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               <span>Currently Signed In</span>
             </div>
             <div className="text-xs text-slate-700 space-y-1">
-              <p className="font-bold">{authState.user?.displayName || 'Authorized User'}</p>
+              <p className="font-bold">{authState.user?.displayName || 'Authorized Creator'}</p>
               <p className="font-mono text-[11px] text-slate-500">{authState.user?.email}</p>
-              <p className="font-mono text-[10px] text-slate-400 break-all">UID: {authState.user?.uid}</p>
             </div>
             <button
               onClick={handleSignOut}
-              className="w-full py-2 rounded-xl bg-white border border-stone-200 hover:bg-rose-50 hover:text-rose-600 text-slate-700 font-bold text-xs transition-colors flex items-center justify-center gap-1.5"
+              className="w-full py-2.5 rounded-xl bg-white border border-stone-200 hover:bg-rose-50 hover:text-rose-600 text-slate-700 font-bold text-xs transition-colors flex items-center justify-center gap-1.5"
             >
               <LogOut className="w-3.5 h-3.5" />
               <span>Sign Out</span>
             </button>
           </div>
         ) : (
-          /* Sign In Form */
-          <div className="space-y-3">
+          /* Simple & Pretty Email Sign In Form */
+          <div className="space-y-3.5">
             {error && (
-              <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-center gap-2">
+              <div className="p-3 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 flex-shrink-0" />
                 <span>{error}</span>
               </div>
             )}
 
-            <form onSubmit={handleEmailSignIn} className="space-y-2.5">
-              <div>
+            <form onSubmit={handleEmailSignIn} className="space-y-3">
+              <div className="space-y-1">
+                <label className="block text-[11px] font-bold text-slate-600 pl-1">
+                  Email
+                </label>
                 <input
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="Email"
+                  placeholder="you@example.com"
                   autoComplete="email"
-                  className="w-full p-2.5 text-xs rounded-xl border border-stone-300 focus:outline-none focus:border-slate-900"
+                  disabled={cooldownSeconds > 0}
+                  className="w-full px-3.5 py-2.5 text-xs rounded-2xl bg-stone-50/70 border border-stone-200 focus:bg-white focus:outline-none focus:border-pink-400 transition-colors disabled:opacity-50"
                   required
                 />
               </div>
-              <div>
+              <div className="space-y-1">
+                <label className="block text-[11px] font-bold text-slate-600 pl-1">
+                  Password
+                </label>
                 <input
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Password"
+                  placeholder="••••••••"
                   autoComplete="current-password"
-                  className="w-full p-2.5 text-xs rounded-xl border border-stone-300 focus:outline-none focus:border-slate-900"
+                  disabled={cooldownSeconds > 0}
+                  className="w-full px-3.5 py-2.5 text-xs rounded-2xl bg-stone-50/70 border border-stone-200 focus:bg-white focus:outline-none focus:border-pink-400 transition-colors disabled:opacity-50"
                   required
                 />
               </div>
 
               <button
                 type="submit"
-                disabled={isLoading}
-                className="w-full py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-retro-sm transition-all flex items-center justify-center gap-1.5"
+                disabled={isLoading || cooldownSeconds > 0}
+                className="w-full mt-1 py-3 rounded-2xl bg-slate-900 hover:bg-slate-800 disabled:bg-slate-400 text-white font-bold text-xs shadow-retro-sm transition-all transform active:translate-x-0.5 active:translate-y-0.5 flex items-center justify-center gap-2"
               >
-                <LogIn className="w-4 h-4" />
-                <span>{isLoading ? 'Signing In...' : 'Sign In with Email'}</span>
+                {cooldownSeconds > 0 ? (
+                  <>
+                    <Lock className="w-3.5 h-3.5 text-pink-200" />
+                    <span>Locked ({cooldownSeconds}s)</span>
+                  </>
+                ) : isLoading ? (
+                  <>
+                    <Lock className="w-3.5 h-3.5 animate-pulse text-pink-300" />
+                    <span>Unlocking Studio...</span>
+                  </>
+                ) : (
+                  <>
+                    <LogIn className="w-3.5 h-3.5 text-pink-300" />
+                    <span>Enter Studio ✨</span>
+                  </>
+                )}
               </button>
             </form>
-
-            <button
-              onClick={handleGoogleSignIn}
-              disabled={isLoading}
-              className="w-full py-2 rounded-xl border border-stone-300 hover:bg-stone-50 text-slate-700 font-semibold text-xs flex items-center justify-center gap-2 transition-colors"
-            >
-              <svg className="w-4 h-4" viewBox="0 0 24 24">
-                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
-                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
-              </svg>
-              <span>Sign In with Google</span>
-            </button>
           </div>
         )}
 

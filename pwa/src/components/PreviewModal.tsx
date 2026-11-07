@@ -123,21 +123,26 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({
 
         {/* Success Banner if Published */}
         {publishResult && (
-          <div className="bg-emerald-50 border-b border-emerald-200 px-4 py-2.5 flex items-center justify-between gap-3 text-xs text-emerald-900 flex-shrink-0 animate-fade-in">
-            <div className="flex items-center gap-2">
-              <div className="w-6 h-6 rounded-full bg-emerald-500 text-white flex items-center justify-center font-bold text-sm">
+          <div className="bg-emerald-50 border-b border-emerald-200 px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs text-emerald-900 flex-shrink-0 animate-fade-in">
+            <div className="flex items-start sm:items-center gap-2.5">
+              <div className="w-6 h-6 rounded-full bg-emerald-500 text-white flex items-center justify-center font-bold text-sm flex-shrink-0 mt-0.5 sm:mt-0">
                 ✓
               </div>
-              <div>
-                <span className="font-bold">Yay, it's published to the live internet! 🎉</span>
-                <span className="ml-1 text-emerald-700">Your nerd just updated your live website!</span>
+              <div className="space-y-0.5">
+                <div>
+                  <span className="font-bold">Yay, it's published to the live internet! 🎉</span>
+                  <span className="ml-1 text-emerald-700">Your nerd just submitted your new website!</span>
+                </div>
+                <p className="text-[11px] text-emerald-700/90 font-medium">
+                  ⏳ Please note: It can take a few minutes for your new changes to go live on the website!
+                </p>
               </div>
             </div>
             <a
               href={resolveLiveSiteUrl(publishResult.htmlUrl, import.meta.env.VITE_LIVE_SITE_URL)}
               target="_blank"
               rel="noopener noreferrer"
-              className="font-bold underline flex items-center gap-1 hover:text-emerald-700"
+              className="font-bold underline flex items-center gap-1 hover:text-emerald-700 flex-shrink-0 self-end sm:self-auto"
             >
               <span>Open Live Website 🌐</span>
               <ExternalLink className="w-3 h-3" />
@@ -179,28 +184,33 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({
             ← Back to Drawing
           </button>
 
-          <button
-            onClick={onPublish}
-            disabled={isPublishing}
-            title="Publish to Live Site"
-            className={`px-5 py-2.5 rounded-xl font-bold text-xs sm:text-sm text-white shadow-retro-sm transition-all transform active:translate-x-0.5 active:translate-y-0.5 flex items-center gap-2 ${
-              isPublishing
-                ? 'bg-slate-400 cursor-not-allowed'
-                : 'bg-emerald-600 hover:bg-emerald-500'
-            }`}
-          >
-            {isPublishing ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Your nerd is publishing your site... 🚀</span>
-              </>
-            ) : (
-              <>
-                <Rocket className="w-4 h-4 text-emerald-200" />
-                <span>Make Website Live! 🚀</span>
-              </>
-            )}
-          </button>
+          <div className="flex flex-col items-end gap-1">
+            <button
+              onClick={onPublish}
+              disabled={isPublishing}
+              title="Publish to Live Site"
+              className={`px-5 py-2.5 rounded-xl font-bold text-xs sm:text-sm text-white shadow-retro-sm transition-all transform active:translate-x-0.5 active:translate-y-0.5 flex items-center gap-2 ${
+                isPublishing
+                  ? 'bg-slate-400 cursor-not-allowed'
+                  : 'bg-emerald-600 hover:bg-emerald-500'
+              }`}
+            >
+              {isPublishing ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Your nerd is publishing your site... 🚀</span>
+                </>
+              ) : (
+                <>
+                  <Rocket className="w-4 h-4 text-emerald-200" />
+                  <span>Make Website Live! 🚀</span>
+                </>
+              )}
+            </button>
+            <span className="text-[10px] text-slate-400 font-medium pr-1">
+              Changes take a few mins to go live ✨
+            </span>
+          </div>
         </div>
 
       </div>

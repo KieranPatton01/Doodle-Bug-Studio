@@ -1,5 +1,5 @@
 import React from 'react';
-import { UserCheck, UserX } from 'lucide-react';
+import { Settings } from 'lucide-react';
 import { AuthState } from '../types';
 
 interface HeaderProps {
@@ -28,24 +28,18 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Action Buttons */}
       <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
-        {/* Auth Status Button */}
+        {/* Settings / Account Button */}
         <button
           onClick={onOpenAuth}
-          className={`p-2 rounded-xl border text-xs font-medium flex items-center gap-1 transition-all ${
+          className={`p-2 rounded-xl border text-xs font-medium flex items-center justify-center transition-all ${
             authState.isAuthenticated
-              ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100'
+              ? 'bg-white border-stone-200 text-slate-700 hover:bg-stone-100'
               : 'bg-stone-100 border-stone-200 text-slate-600 hover:bg-stone-200'
           }`}
-          title={authState.isAuthenticated ? 'Signed in! Ready to publish 💖' : 'Sign in to publish your website!'}
+          title={authState.isAuthenticated ? 'Studio Settings & Account' : 'Sign in to Studio'}
+          aria-label="Settings and Account"
         >
-          {authState.isAuthenticated ? (
-            <UserCheck className="w-4 h-4 text-emerald-600" />
-          ) : (
-            <UserX className="w-4 h-4 text-slate-400" />
-          )}
-          <span className="hidden sm:inline">
-            {authState.isAuthenticated ? 'VIP Ready' : 'Sign in'}
-          </span>
+          <Settings className="w-4 h-4 text-slate-600" />
         </button>
 
         {/* Primary Action: GENERATE WEBPAGE */}
