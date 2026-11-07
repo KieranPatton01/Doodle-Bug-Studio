@@ -8,9 +8,9 @@
  * - POST /api/publish      -> Auth validation + GitHub REST API commit to canvas.html
  */
 
-import { Env, GenerateRequest, PublishRequest } from './types';
+import { Env, GenerateRequest, PublishRequest, AssistRequest } from './types';
 import { verifyFirebaseToken } from './auth';
-import { generateCanvasFromDoodle } from './gemini';
+import { generateCanvasFromDoodle, generateCanvasAssistPlan } from './gemini';
 import { commitCanvasToGitHub, getGitHubConfig } from './github';
 import { validateCanvasHtml } from './validator';
 
@@ -430,7 +430,56 @@ export default {
       }
     }
 
-    // 5. Route Not Found
+    // 5. POST /api/assist - AI Nerd Assist Canvas Layout Generator
+    if (pathname === '/api/assist') {
+      if (method !== 'POST') {
+        return jsonResponse({ error: 'Method not allowed' }, 405, env, {}, origin);
+      }
+
+      const authResult = await verifyFirebaseToken(request.headers.get('Authorization'), env);
+      if (!authResult.valid) {
+        return jsonResponse(
+          { error: authResult.error || 'Unauthorized' },
+          authResult.statusCode || 401,
+          env,
+          {},
+          origin
+        );
+      }
+
+      const rateLimitKey = `assist:${authResult.uid || 'anon'}`;
+      const limitResult = checkRateLimit(rateLimitKey, 15, 60_000);
+      if (!limitResult.allowed) {
+        return jsonResponse(
+          { error: `Too many Nerd Assist requests. Please wait ${limitResult.retryAfterSeconds} seconds.` },
+          429,
+          env,
+          { 'Retry-After': String(limitResult.retryAfterSeconds) },
+          origin
+        );
+      }
+
+      let body: AssistRequest;
+      try {
+        body = (await request.json()) as AssistRequest;
+      } catch {
+        return jsonResponse({ error: 'Invalid JSON request body' }, 400, env, {}, origin);
+      }
+
+      if (!body.prompt || typeof body.prompt !== 'string' || !body.prompt.trim()) {
+        return jsonResponse({ error: 'Missing required field: prompt' }, 400, env, {}, origin);
+      }
+
+      try {
+        const assistPlan = await generateCanvasAssistPlan(body, env);
+        return jsonResponse(assistPlan, 200, env, {}, origin);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return jsonResponse({ error: `Nerd Assist failed: ${message}` }, 502, env, {}, origin);
+      }
+    }
+
+    // 6. Route Not Found
     return jsonResponse(
       { error: `Route not found: ${method} ${pathname}` },
       404,

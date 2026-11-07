@@ -163,8 +163,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
         {/* Cute Centered Header */}
         <div className="text-center space-y-2 pt-1">
-          <div className="w-14 h-14 mx-auto rounded-2xl bg-pink-50 border-2 border-pink-200 shadow-retro-sm flex items-center justify-center text-2xl">
-            🐛
+          <div className="w-14 h-14 mx-auto rounded-2xl bg-pink-50 border-2 border-pink-200 shadow-retro-sm flex items-center justify-center p-2">
+            <img
+              src="./icon-192.png"
+              alt="Doodlebug Studio"
+              className="w-full h-full object-contain drop-shadow-xs"
+            />
           </div>
           <h3 className="font-extrabold text-slate-900 text-lg tracking-tight flex items-center justify-center gap-1.5">
             <span>Doodlebug Studio</span>

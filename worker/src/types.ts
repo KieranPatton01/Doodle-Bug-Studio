@@ -66,6 +66,33 @@ export interface PublishResponse {
   branch: string;
 }
 
+export interface AssistRequest {
+  prompt: string;
+  width?: number;
+  height?: number;
+}
+
+export interface AssistResponse {
+  strokes: Array<{
+    tool: 'brush' | 'marker';
+    color: string;
+    size: number;
+    points: Array<{ x: number; y: number }>;
+  }>;
+  notes: Array<{
+    text: string;
+    x: number;
+    y: number;
+    color: string;
+    fontSize: number;
+  }>;
+  stickers: Array<{
+    assetId: string;
+    x: number;
+    y: number;
+  }>;
+}
+
 export interface AuthVerificationResult {
   valid: boolean;
   uid?: string;

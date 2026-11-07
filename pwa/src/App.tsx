@@ -8,16 +8,23 @@ import { TextModal } from './components/TextModal';
 import { StickerTrayModal, PlaceStickerOptions } from './components/StickerTrayModal';
 import { PreviewModal } from './components/PreviewModal';
 import { AuthModal } from './components/AuthModal';
+import {
+  NerdAssistModal,
+  NerdAssistPlan,
+  buildNerdAssistPlan,
+  resolveAiAssistPlan,
+} from './components/NerdAssistModal';
 import { 
   ToolType, 
   StickerTrayTab,
+  DrawingStroke,
   CanvasTextNote, 
   CanvasSticker, 
   GenerateResult, 
   PublishResult, 
   AuthState 
 } from './types';
-import { callGenerateApi, callPublishApi } from './services/workerClient';
+import { callGenerateApi, callPublishApi, callAssistApi } from './services/workerClient';
 import { initFirebase, getFirebaseAuth } from './config/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 
@@ -43,9 +50,12 @@ export const App: React.FC = () => {
   const [stickerTrayTab, setStickerTrayTab] = useState<StickerTrayTab>('gifs');
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [isNerdAssistOpen, setIsNerdAssistOpen] = useState(false);
 
   // API Execution states
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isAssisting, setIsAssisting] = useState(false);
+  const [assistStatusText, setAssistStatusText] = useState<string>('');
   const [generateResult, setGenerateResult] = useState<GenerateResult | null>(null);
   const [isPublishing, setIsPublishing] = useState(false);
   const [publishResult, setPublishResult] = useState<PublishResult | null>(null);
@@ -169,7 +179,11 @@ export const App: React.FC = () => {
   }, []);
 
   // Vibecode Generation Action
-  const handleVibecode = async () => {
+  const handleVibecode = async (overrideItems?: {
+    strokesList?: DrawingStroke[];
+    notesList?: CanvasTextNote[];
+    stickersList?: CanvasSticker[];
+  }) => {
     const currentToken = await getFreshIdToken();
     if (!authState.isAuthenticated || !currentToken) {
       setIsAuthModalOpen(true);
@@ -178,18 +192,29 @@ export const App: React.FC = () => {
 
     if (!canvasRef.current) return;
 
+    const activeNotes = overrideItems?.notesList ?? textNotes;
+    const activeStickers = overrideItems?.stickersList ?? stickers;
+
     try {
-      const snapshotBase64 = await canvasRef.current.exportSnapshot();
+      const snapshotBase64 = await canvasRef.current.exportSnapshot(
+        overrideItems
+          ? {
+              strokes: overrideItems.strokesList,
+              stickers: activeStickers,
+              textNotes: activeNotes,
+            }
+          : undefined
+      );
       const imageUrls = Array.from(
         new Set(
-          stickers
+          activeStickers
             .filter((s) => s.url.startsWith('https://'))
             .map((s) => s.url)
         )
       ).slice(0, 20);
 
-      const noteLines = textNotes.map((n) => n.text);
-      for (const s of stickers) {
+      const noteLines = activeNotes.map((n) => n.text);
+      for (const s of activeStickers) {
         if ((s.kind === 'sticker' || s.kind === 'washi') && s.label) {
           noteLines.push(`[Decorative ${s.kind}: ${s.label}]`);
         }
@@ -201,8 +226,8 @@ export const App: React.FC = () => {
         snapshotBase64,
         imageUrls,
         notes,
-        textNotes,
-        stickers,
+        activeNotes,
+        activeStickers,
       });
 
       if (generateResult && lastGeneratedSignatureRef.current === canvasSignature) {
@@ -229,6 +254,100 @@ export const App: React.FC = () => {
       setErrorNotification(`Oops! Your nerd got a little confused: ${message}`);
     } finally {
       setIsGenerating(false);
+    }
+  };
+
+  // Option B: Nerd Assist — Ask Gemini to design a custom layout with your tools, animate it on the canvas, and build the webpage!
+  const handleRunNerdAssist = async (prompt: string) => {
+    const currentToken = await getFreshIdToken();
+    if (!authState.isAuthenticated || !currentToken) {
+      setIsAuthModalOpen(true);
+      return;
+    }
+
+    setIsAssisting(true);
+    setAssistStatusText('Your nerd is brainstorming your page... 🧠✨');
+
+    const dims = canvasRef.current?.getDimensions?.() || { width: 390, height: 600 };
+    const delay = (ms: number) => new Promise((res) => setTimeout(res, ms));
+
+    let plan: NerdAssistPlan;
+    try {
+      const aiResponse = await callAssistApi({
+        prompt,
+        width: dims.width,
+        height: dims.height,
+        idToken: currentToken,
+      });
+      const resolved = resolveAiAssistPlan(aiResponse, dims);
+      if (resolved.notes.length > 0 || resolved.strokes.length > 0) {
+        plan = resolved;
+      } else {
+        plan = buildNerdAssistPlan(prompt, dims);
+      }
+    } catch {
+      // Fallback if Worker hasn't deployed /api/assist yet
+      plan = buildNerdAssistPlan(prompt, dims);
+    }
+
+    setIsNerdAssistOpen(false);
+
+    try {
+      // Clear previous canvas so the nerd starts on a fresh page
+      canvasRef.current?.clearCanvas();
+      setTextNotes([]);
+      setStickers([]);
+      await delay(150);
+
+      // 1. Nerd draws strokes with the Brush & Marker tools
+      setAssistStatusText('Your nerd is sketching with your pens & markers... 🖍️');
+      for (const stroke of plan.strokes) {
+        canvasRef.current?.addStroke(stroke);
+        await delay(170);
+      }
+
+      // 2. Nerd places Washi Tape, Stickers, and GIFs from the tray
+      setAssistStatusText('Your nerd is sticking down washi tape, stickers & GIFs... 🎀');
+      const createdStickers: CanvasSticker[] = [];
+      for (const s of plan.stickers) {
+        const newSticker: CanvasSticker = {
+          ...s,
+          id: Math.random().toString(36).substring(2, 9),
+        };
+        createdStickers.push(newSticker);
+        setStickers([...createdStickers]);
+        await delay(160);
+      }
+
+      // 3. Nerd writes handwritten Text Notes
+      setAssistStatusText('Your nerd is writing cute notes on your page... 💌');
+      const createdNotes: CanvasTextNote[] = [];
+      for (const n of plan.notes) {
+        const newNote: CanvasTextNote = {
+          ...n,
+          id: Math.random().toString(36).substring(2, 9),
+        };
+        createdNotes.push(newNote);
+        setTextNotes([...createdNotes]);
+        await delay(170);
+      }
+
+      // Let the user admire the finished doodle for a beat before triggering webpage generation
+      setAssistStatusText('Doodle finished! Now building your live webpage... 🤓✨');
+      await delay(550);
+      setIsAssisting(false);
+      setAssistStatusText('');
+
+      await handleVibecode({
+        strokesList: plan.strokes,
+        notesList: createdNotes,
+        stickersList: createdStickers,
+      });
+    } catch (err) {
+      setIsAssisting(false);
+      setAssistStatusText('');
+      const message = err instanceof Error ? err.message : String(err);
+      setErrorNotification(`Oops! Your nerd tripped while doodling: ${message}`);
     }
   };
 
@@ -259,8 +378,8 @@ export const App: React.FC = () => {
       
       {/* Top Navigation & Actions Bar */}
       <Header
-        onVibecode={handleVibecode}
-        isGenerating={isGenerating}
+        onVibecode={() => handleVibecode()}
+        isGenerating={isGenerating || isAssisting}
         authState={authState}
         onOpenAuth={() => setIsAuthModalOpen(true)}
       />
@@ -297,6 +416,7 @@ export const App: React.FC = () => {
           setStickerTrayTab(tab);
           setIsStickerTrayOpen(true);
         }}
+        onOpenNerdAssist={() => setIsNerdAssistOpen(true)}
         canUndo={canUndo}
         canRedo={canRedo}
         onUndo={() => canvasRef.current?.undo()}
@@ -339,6 +459,12 @@ export const App: React.FC = () => {
         initialTab={stickerTrayTab}
       />
 
+      <NerdAssistModal
+        isOpen={isNerdAssistOpen}
+        onClose={() => setIsNerdAssistOpen(false)}
+        onRunAssist={handleRunNerdAssist}
+        isAssisting={isAssisting}
+      />
 
       <PreviewModal
         isOpen={isPreviewModalOpen}
@@ -360,6 +486,14 @@ export const App: React.FC = () => {
         onUpdateAuthState={handleUpdateAuthState}
         isLockedGate={!authState.isAuthenticated}
       />
+
+      {/* Floating pill while watching the Nerd draw on the canvas */}
+      {isAssisting && assistStatusText && (
+        <div className="fixed top-16 left-1/2 transform -translate-x-1/2 z-40 px-4 py-2 rounded-2xl bg-slate-900/90 text-white text-xs font-bold shadow-retro flex items-center gap-2 animate-fade-in pointer-events-none">
+          <span className="text-base animate-bounce">🤓</span>
+          <span>{assistStatusText}</span>
+        </div>
+      )}
 
       {/* Nerd Building Webpage Loading Screen with Animated GIF */}
       {isGenerating && (

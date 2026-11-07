@@ -177,3 +177,71 @@ export async function callPublishApi(params: PublishParams): Promise<PublishResu
   const data = (await response.json()) as PublishResult;
   return data;
 }
+
+export interface AssistApiParams {
+  prompt: string;
+  width: number;
+  height: number;
+  idToken: string;
+}
+
+export interface AssistApiResponse {
+  strokes: Array<{
+    tool: 'brush' | 'marker';
+    color: string;
+    size: number;
+    points: Array<{ x: number; y: number }>;
+  }>;
+  notes: Array<{
+    text: string;
+    x: number;
+    y: number;
+    color: string;
+    fontSize: number;
+  }>;
+  stickers: Array<{
+    assetId: string;
+    x: number;
+    y: number;
+  }>;
+}
+
+/**
+ * Calls Cloudflare Worker /api/assist so Gemini designs a custom canvas layout
+ */
+export async function callAssistApi(params: AssistApiParams): Promise<AssistApiResponse> {
+  const baseUrl = getWorkerBaseUrl();
+  if (!baseUrl) {
+    throw new Error('Cloudflare Worker URL is not configured.');
+  }
+
+  const url = `${baseUrl}/api/assist`;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 25000);
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${params.idToken}`,
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        prompt: params.prompt,
+        width: params.width,
+        height: params.height,
+      }),
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+
+  if (!response.ok) {
+    const errText = await response.text().catch(() => response.statusText);
+    throw new Error(`[HTTP ${response.status}] ${errText}`);
+  }
+
+  return (await response.json()) as AssistApiResponse;
+}

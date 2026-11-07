@@ -20,8 +20,12 @@ export const Header: React.FC<HeaderProps> = ({
       
       {/* Brand */}
       <div className="flex items-center gap-2 min-w-0">
-        <div className="flex items-center gap-1.5 font-extrabold text-slate-900 text-sm sm:text-base tracking-tight">
-          <span className="text-xl">🐛</span>
+        <div className="flex items-center gap-2 font-extrabold text-slate-900 text-sm sm:text-base tracking-tight">
+          <img
+            src="./favicon-32x32.png"
+            alt="Doodlebug Studio"
+            className="w-6 h-6 object-contain drop-shadow-xs"
+          />
           <span className="inline">Doodlebug</span>
         </div>
       </div>

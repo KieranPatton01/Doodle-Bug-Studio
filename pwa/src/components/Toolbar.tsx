@@ -21,6 +21,7 @@ interface ToolbarProps {
   onOpenBrushPicker: () => void;
   onOpenTextModal: () => void;
   onOpenStickerTray: (tab?: StickerTrayTab) => void;
+  onOpenNerdAssist?: () => void;
   canUndo: boolean;
   canRedo: boolean;
   onUndo: () => void;
@@ -37,6 +38,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   onOpenBrushPicker,
   onOpenTextModal,
   onOpenStickerTray,
+  onOpenNerdAssist,
   canUndo,
   canRedo,
   onUndo,
@@ -139,6 +141,18 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           <Sparkles className="w-5 h-5 text-rose-500" />
           <span className="text-[10px] font-semibold mt-0.5">Stickers</span>
         </button>
+
+        {/* Nerd Assist Button */}
+        {onOpenNerdAssist && (
+          <button
+            onClick={onOpenNerdAssist}
+            className="p-2 sm:p-2.5 rounded-2xl bg-pink-50 hover:bg-pink-100 border border-pink-200 text-slate-800 flex flex-col items-center justify-center transition-all transform active:scale-90"
+            title="Nerd Assist — Let your nerd doodle & build a webpage from a prompt!"
+          >
+            <span className="text-base leading-none">🤓</span>
+            <span className="text-[10px] font-bold mt-0.5 text-pink-700">Nerd</span>
+          </button>
+        )}
 
         <div className="w-[1px] h-8 bg-stone-200 mx-0.5" />
 

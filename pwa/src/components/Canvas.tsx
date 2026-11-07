@@ -5,8 +5,13 @@ import { CanvasNoteItem } from './CanvasNoteItem';
 import { CanvasStickerItem } from './CanvasStickerItem';
 
 export interface CanvasHandle {
-  exportSnapshot: () => Promise<string>;
+  exportSnapshot: (overrides?: {
+    strokes?: DrawingStroke[];
+    stickers?: CanvasSticker[];
+    textNotes?: CanvasTextNote[];
+  }) => Promise<string>;
   clearCanvas: () => void;
+  addStroke: (stroke: DrawingStroke) => void;
   undo: () => void;
   redo: () => void;
   canUndo: boolean;
@@ -45,6 +50,11 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(({
   const [strokes, setStrokes] = useState<DrawingStroke[]>([]);
   const strokesRef = useRef<DrawingStroke[]>([]);
   strokesRef.current = strokes;
+
+  const textNotesRef = useRef<CanvasTextNote[]>(textNotes);
+  textNotesRef.current = textNotes;
+  const stickersRef = useRef<CanvasSticker[]>(stickers);
+  stickersRef.current = stickers;
 
   const [redoStack, setRedoStack] = useState<DrawingStroke[]>([]);
   const isDrawingRef = useRef(false);
@@ -315,6 +325,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(({
       redrawAllStrokes(updatedStrokes);
     },
     clearCanvas: () => {
+      strokesRef.current = [];
       setStrokes([]);
       setRedoStack([]);
       const canvas = canvasRef.current;
@@ -322,6 +333,13 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(({
         const ctx = canvas.getContext('2d');
         if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
       }
+    },
+    addStroke: (stroke: DrawingStroke) => {
+      const updated = [...strokesRef.current, stroke];
+      strokesRef.current = updated;
+      setStrokes(updated);
+      setRedoStack([]);
+      redrawAllStrokes(updated);
     },
     canUndo: strokes.length > 0,
     canRedo: redoStack.length > 0,
@@ -332,12 +350,12 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(({
       }
       return { width: 390, height: 600 };
     },
-    exportSnapshot: () =>
+    exportSnapshot: (overrides) =>
       renderCanvasSnapshot({
         container: containerRef.current,
-        strokes,
-        stickers,
-        textNotes,
+        strokes: overrides?.strokes ?? strokesRef.current,
+        stickers: overrides?.stickers ?? stickersRef.current,
+        textNotes: overrides?.textNotes ?? textNotesRef.current,
       }),
   }));
 
