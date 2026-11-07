@@ -4,13 +4,19 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Doodlebug</title>
+  <!-- Anti-cache meta tags for mobile browsers -->
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
   <!-- PWA Meta Tags & Manifest -->
   <meta name="theme-color" content="#FFFDF5" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-  <meta name="apple-mobile-web-app-title" content="My Site" />
+  <meta name="apple-mobile-web-app-title" content="Doodlebug" />
   <link rel="manifest" href="manifest.json" />
-  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+  <link rel="icon" type="image/x-icon" href="favicon.ico" />
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png" />
+  <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png" />
   <link rel="apple-touch-icon" href="apple-touch-icon.png" />
   <link rel="stylesheet" href="styles.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -47,7 +53,11 @@
       color: #292524;
     }
     .header-brand .logo-icon {
-      font-size: 1.35rem;
+      width: 28px;
+      height: 28px;
+      border-radius: 7px;
+      object-fit: contain;
+      display: block;
     }
     .header-badge {
       display: inline-flex;
@@ -55,11 +65,18 @@
       gap: 6px;
       font-size: 0.75rem;
       font-weight: 600;
-      padding: 3px 10px;
+      padding: 4px 11px;
       border-radius: 9999px;
       background: #ecfdf5;
       color: #059669;
       border: 1px solid #a7f3d0;
+      cursor: pointer;
+      user-select: none;
+      transition: transform 0.15s ease, background-color 0.15s ease;
+    }
+    .header-badge:active {
+      transform: scale(0.96);
+      background: #d1fae5;
     }
     main {
       flex: 1;
@@ -93,11 +110,11 @@
 <body>
   <header>
     <div class="header-brand">
-      <span class="logo-icon">🐛</span>
+      <img src="favicon-32x32.png" alt="Doodlebug" class="logo-icon" />
       <span>Doodlebug</span>
     </div>
-    <div class="header-badge" id="update-badge" title="Last updated time">
-      <span id="update-time">Last updated</span>
+    <div class="header-badge" id="update-badge" title="Tap to check for new updates">
+      <span id="update-time">Checking live version...</span>
     </div>
   </header>
 
@@ -119,51 +136,121 @@
   <script src="iframe-resizer.js"></script>
   <script>
     (function() {
+      const badge = document.getElementById('update-badge');
       const badgeText = document.getElementById('update-time');
-      if (!badgeText) return;
+      const iframe = document.getElementById('doodle-stage');
+      if (!badgeText || !iframe) return;
+
+      let lastKnownSignature = null;
+      let lastLiveBuildDate = null;
 
       function timeAgo(date) {
-        const seconds = Math.floor((new Date() - date) / 1000);
+        const seconds = Math.max(0, Math.floor((new Date() - date) / 1000));
         if (seconds < 60) return 'Just now';
         const minutes = Math.floor(seconds / 60);
-        if (minutes < 60) return `${minutes}m ago`;
+        if (minutes < 60) return minutes + 'm ago';
         const hours = Math.floor(minutes / 60);
-        if (hours < 24) return `${hours}h ago`;
+        if (hours < 24) return hours + 'h ago';
         const days = Math.floor(hours / 24);
         if (days === 1) return 'Yesterday';
-        if (days < 30) return `${days}d ago`;
+        if (days < 30) return days + 'd ago';
         return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
       }
 
-      fetch('https://api.github.com/repos/kieranpatton01/DoodleBug/commits?path=canvas.html&page=1&per_page=1')
-        .then(function(res) {
-          if (!res.ok) throw new Error();
-          return res.json();
-        })
-        .then(function(commits) {
-          if (commits && commits[0] && commits[0].commit && commits[0].commit.committer) {
-            const date = new Date(commits[0].commit.committer.date);
-            badgeText.textContent = 'Last updated ' + timeAgo(date);
+      function renderBadgeTime() {
+        if (lastLiveBuildDate && !isNaN(lastLiveBuildDate.getTime())) {
+          badgeText.textContent = 'Live ' + timeAgo(lastLiveBuildDate);
+        } else {
+          badgeText.textContent = 'Live now';
+        }
+      }
+
+      // Fetch canvas.html with a unique cache-busting timestamp so mobile browsers
+      // and Cloudflare edge proxies always check the actual live GitHub Pages build.
+      function syncLiveCanvas(forceReloadIframe) {
+        const bust = Date.now();
+        const freshUrl = 'canvas.html?_t=' + bust;
+
+        fetch(freshUrl, {
+          method: 'GET',
+          cache: 'no-store',
+          headers: {
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache'
           }
         })
-        .catch(function() {
-          try {
-            const mod = new Date(document.lastModified);
-            if (!isNaN(mod.getTime()) && mod.getFullYear() > 2020) {
-              badgeText.textContent = 'Last updated ' + timeAgo(mod);
-            } else {
-              badgeText.textContent = 'Last updated';
+          .then(function(res) {
+            if (!res.ok) throw new Error('Fetch failed');
+            // Last-Modified header on canvas.html is set by GitHub Pages when the Pages build finishes deploying!
+            const lastModHeader = res.headers.get('Last-Modified');
+            if (lastModHeader) {
+              const parsed = new Date(lastModHeader);
+              if (!isNaN(parsed.getTime())) {
+                lastLiveBuildDate = parsed;
+              }
             }
-          } catch(e) {
-            badgeText.textContent = 'Last updated';
-          }
+            return res.text();
+          })
+          .then(function(htmlText) {
+            const sig = (lastLiveBuildDate ? lastLiveBuildDate.getTime() : '') + ':' + htmlText.length;
+            if (lastKnownSignature === null) {
+              lastKnownSignature = sig;
+              // Bust mobile browser iframe cache on initial load
+              iframe.src = freshUrl;
+            } else if (sig !== lastKnownSignature || forceReloadIframe) {
+              lastKnownSignature = sig;
+              iframe.src = freshUrl;
+            }
+            renderBadgeTime();
+          })
+          .catch(function() {
+            if (!lastLiveBuildDate) {
+              const mod = new Date(document.lastModified);
+              if (!isNaN(mod.getTime()) && mod.getFullYear() > 2020) {
+                lastLiveBuildDate = mod;
+              }
+            }
+            renderBadgeTime();
+          });
+      }
+
+      // 1. Immediate cache-busted sync on page load
+      syncLiveCanvas(false);
+
+      // 2. Tap the "Live Xm ago" pill anytime to force an instant cache-busted reload
+      if (badge) {
+        badge.addEventListener('click', function() {
+          badgeText.textContent = 'Refreshing...';
+          syncLiveCanvas(true);
         });
+      }
+
+      // 3. Re-check automatically when returning to the mobile browser tab
+      document.addEventListener('visibilitychange', function() {
+        if (document.visibilityState === 'visible') {
+          syncLiveCanvas(false);
+        }
+      });
+
+      // 4. Poll every 30s so if a GitHub Pages build finishes while viewing, it updates automatically
+      setInterval(function() {
+        syncLiveCanvas(false);
+      }, 30000);
     })();
   </script>
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function() {
-        navigator.serviceWorker.register('sw.js').catch(function() {});
+        var isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+        if (isLocal) {
+          navigator.serviceWorker.getRegistrations().then(function(regs) {
+            regs.forEach(function(r) { r.unregister(); });
+          });
+        } else {
+          navigator.serviceWorker.register('sw.js').then(function(reg) {
+            reg.update().catch(function() {});
+          }).catch(function() {});
+        }
       });
     }
   </script>

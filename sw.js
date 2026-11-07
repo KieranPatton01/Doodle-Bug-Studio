@@ -1,14 +1,16 @@
 // Doodlebug Live Site Service Worker
-// Network-first for canvas.html and live updates, cache-first for shell assets
+// Strict network-first (bypassing browser HTTP disk cache) for HTML & live updates
 
-const CACHE_NAME = 'doodlebug-live-v1';
+const CACHE_NAME = 'doodlebug-live-v2';
 const SHELL_ASSETS = [
   './',
   './index.html',
   './styles.css',
   './iframe-resizer.js',
   './manifest.json',
-  './favicon.svg',
+  './favicon.ico',
+  './favicon-32x32.png',
+  './favicon-16x16.png',
   './apple-touch-icon.png',
   './icon-192.png',
   './icon-512.png',
@@ -33,13 +35,14 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  // Skip non-GET requests
-  if (event.request.method !== 'GET') return;
+  // Skip non-GET requests or cross-origin requests
+  if (event.request.method !== 'GET' || url.origin !== self.location.origin) return;
 
-  // Network-first for HTML pages (canvas.html & index.html) to always serve latest published design
+  // Network-first with cache: 'no-store' for HTML pages (canvas.html & index.html)
+  // so mobile Safari/Chrome never serves a 10-minute stale cached copy when online.
   if (event.request.mode === 'navigate' || url.pathname.endsWith('.html') || url.pathname.endsWith('/')) {
     event.respondWith(
-      fetch(event.request)
+      fetch(event.request, { cache: 'no-store' })
         .then((response) => {
           if (response && response.status === 200) {
             const clone = response.clone();
@@ -52,17 +55,16 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Cache-first for static icons, css, and js
+  // Network-first for icons/manifest so updated branding shows up immediately
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      if (cached) return cached;
-      return fetch(event.request).then((response) => {
+    fetch(event.request)
+      .then((response) => {
         if (response && response.status === 200 && response.type === 'basic') {
           const clone = response.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
         }
         return response;
-      });
-    })
+      })
+      .catch(() => caches.match(event.request))
   );
 });

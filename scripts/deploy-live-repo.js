@@ -20,6 +20,19 @@ execSync('git init', { cwd: tempDir, stdio: 'inherit' });
 execSync('git config user.name "Kieran Patton"', { cwd: tempDir, stdio: 'inherit' });
 execSync('git config user.email "kieranpatton01@users.noreply.github.com"', { cwd: tempDir, stdio: 'inherit' });
 execSync('git remote add origin https://github.com/KieranPatton01/DoodleBug.git', { cwd: tempDir, stdio: 'inherit' });
+
+// Preserve currently published canvas.html from origin/main so shell updates never overwrite user's live art
+try {
+  execSync('git fetch origin main --depth=1', { cwd: tempDir, stdio: 'inherit' });
+  const liveCanvas = execSync('git show origin/main:canvas.html', { cwd: tempDir, encoding: 'utf8' });
+  if (liveCanvas && liveCanvas.includes('<html')) {
+    fs.writeFileSync(path.join(tempDir, 'canvas.html'), liveCanvas, 'utf8');
+    console.log('✅ Preserved existing published canvas.html from origin/main');
+  }
+} catch (err) {
+  console.log('ℹ️ Using default template canvas.html');
+}
+
 execSync('git add .', { cwd: tempDir, stdio: 'inherit' });
 execSync('git commit -m "feat: Doodlebug live showcase website (PWA)"', { cwd: tempDir, stdio: 'inherit' });
 execSync('git branch -M main', { cwd: tempDir, stdio: 'inherit' });
