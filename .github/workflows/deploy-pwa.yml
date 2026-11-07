@@ -33,6 +33,13 @@ jobs:
 
       - name: Install dependencies & Build Studio PWA
         working-directory: ./pwa
+        env:
+          VITE_FIREBASE_API_KEY: AIzaSyB4AZQqe2qWfIhwPow8nB9hok6VgY8ffrM
+          VITE_FIREBASE_AUTH_DOMAIN: doodlebug-ddc9c.firebaseapp.com
+          VITE_FIREBASE_PROJECT_ID: doodlebug-ddc9c
+          VITE_FIREBASE_STORAGE_BUCKET: doodlebug-ddc9c.firebasestorage.app
+          VITE_WORKER_URL: https://doodlebug-gateway.isingingbanana.workers.dev
+          VITE_LIVE_SITE_URL: https://kieranpatton01.github.io/DoodleBug/
         run: |
           npm ci
           npm run build

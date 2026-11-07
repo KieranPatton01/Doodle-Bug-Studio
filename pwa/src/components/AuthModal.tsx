@@ -14,6 +14,7 @@ interface AuthModalProps {
   onClose: () => void;
   authState: AuthState;
   onUpdateAuthState: (state: AuthState) => void;
+  isLockedGate?: boolean;
 }
 
 export const AuthModal: React.FC<AuthModalProps> = ({
@@ -21,6 +22,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   onClose,
   authState,
   onUpdateAuthState,
+  isLockedGate = false,
 }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -111,22 +113,36 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs animate-fade-in">
+    <div
+      className={`fixed inset-0 z-50 flex items-center justify-center p-4 animate-fade-in ${
+        isLockedGate && !authState.isAuthenticated
+          ? 'bg-butter'
+          : 'bg-black/40 backdrop-blur-xs'
+      }`}
+    >
       <div className="bg-white rounded-3xl border border-stone-200 shadow-retro max-w-sm w-full p-5 space-y-4">
         
         {/* Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Lock className="w-5 h-5 text-slate-800" />
-            <h3 className="font-extrabold text-slate-900 text-base">VIP Creator Access 💖</h3>
+            <h3 className="font-extrabold text-slate-900 text-base">
+              {isLockedGate && !authState.isAuthenticated
+                ? '🐛 Doodlebug Studio 💖'
+                : 'VIP Creator Access 💖'}
+            </h3>
           </div>
-          <button onClick={onClose} className="p-1 rounded-xl hover:bg-stone-100 text-slate-500">
-            <X className="w-4 h-4" />
-          </button>
+          {(!isLockedGate || authState.isAuthenticated) && (
+            <button onClick={onClose} className="p-1 rounded-xl hover:bg-stone-100 text-slate-500">
+              <X className="w-4 h-4" />
+            </button>
+          )}
         </div>
 
         <p className="text-xs text-slate-500">
-          Sign in so your nerd knows it's really you before publishing your website to the world!
+          {isLockedGate && !authState.isAuthenticated
+            ? 'Welcome to your private studio! Sign in once so your nerd knows it is really you before unlocking your canvas and photo tray.'
+            : "Sign in so your nerd knows it's really you before publishing your website to the world!"}
         </p>
 
         {authState.isAuthenticated ? (

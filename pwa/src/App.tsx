@@ -334,10 +334,15 @@ export const App: React.FC = () => {
       />
 
       <AuthModal
-        isOpen={isAuthModalOpen}
-        onClose={() => setIsAuthModalOpen(false)}
+        isOpen={isAuthModalOpen || !authState.isAuthenticated}
+        onClose={() => {
+          if (authState.isAuthenticated) {
+            setIsAuthModalOpen(false);
+          }
+        }}
         authState={authState}
         onUpdateAuthState={handleUpdateAuthState}
+        isLockedGate={!authState.isAuthenticated}
       />
 
       {/* Nerd Building Webpage Loading Screen with Animated GIF */}
