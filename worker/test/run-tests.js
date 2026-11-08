@@ -563,6 +563,235 @@ async function runAllTests() {
     }
   });
 
+  await test('generateCanvasFromDoodle filters out thought parts and sends correct generationConfig', async () => {
+    const origFetch = global.fetch;
+    let capturedBody = null;
+    global.fetch = async (url, options) => {
+      capturedBody = JSON.parse(options.body);
+      return new Response(JSON.stringify({
+        candidates: [{
+          content: {
+            parts: [
+              { thought: true, text: 'Thinking about the bee layout...' },
+              { text: '<!DOCTYPE html><html><head></head><body><h1>Yellow Bee</h1></body></html>' }
+            ]
+          },
+          finishReason: 'STOP'
+        }]
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    };
+
+    try {
+      const res = await generateCanvasFromDoodle({
+        snapshotBase64: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+        notes: 'Yellow bee site',
+      }, testEnv);
+
+      assert.strictEqual(capturedBody.generationConfig.maxOutputTokens, 16384);
+      assert.strictEqual(capturedBody.generationConfig.thinkingConfig.thinkingLevel, 'LOW');
+      assert.strictEqual(capturedBody.generationConfig.temperature, undefined);
+      assert.strictEqual(capturedBody.generationConfig.topP, undefined);
+      assert.match(res.html, /Yellow Bee/);
+      assert.strictEqual(res.html.includes('Thinking about the bee layout'), false);
+    } finally {
+      global.fetch = origFetch;
+    }
+  });
+
+  await test('generateCanvasFromDoodle catches subrequest timeout and throws clean busy server error', async () => {
+    const origFetch = global.fetch;
+    global.fetch = async () => {
+      const abortErr = new Error('The operation was aborted due to timeout');
+      abortErr.name = 'TimeoutError';
+      throw abortErr;
+    };
+
+    try {
+      await assert.rejects(async () => {
+        await generateCanvasFromDoodle({
+          snapshotBase64: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+        }, testEnv);
+      }, (err) => {
+        assert.strictEqual(err.message, 'Server is currently busy. Please try again in a few moments.');
+        return true;
+      });
+    } finally {
+      global.fetch = origFetch;
+    }
+  });
+
+  await test('generateCanvasAssistPlan filters out thought parts and sends correct generationConfig', async () => {
+    const origFetch = global.fetch;
+    let capturedBody = null;
+    global.fetch = async (url, options) => {
+      capturedBody = JSON.parse(options.body);
+      return new Response(JSON.stringify({
+        candidates: [{
+          content: {
+            parts: [
+              { thought: true, text: 'Brainstorming funny teasing lines for gf...' },
+              { text: JSON.stringify({
+                strokes: [],
+                notes: [{ text: '🚨 OFFICIAL STINKY ALERT 🚨', x: 50, y: 50 }],
+                stickers: [{ assetId: 'sticker-sparkles', x: 100, y: 100 }]
+              }) }
+            ]
+          },
+          finishReason: 'STOP'
+        }]
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    };
+
+    try {
+      const plan = await generateCanvasAssistPlan({
+        prompt: 'ragebait website for stinky gf',
+        width: 390,
+        height: 600,
+      }, testEnv);
+
+      assert.strictEqual(capturedBody.generationConfig.maxOutputTokens, 8192);
+      assert.strictEqual(capturedBody.generationConfig.thinkingConfig.thinkingLevel, 'LOW');
+      assert.strictEqual(capturedBody.generationConfig.temperature, undefined);
+      assert.strictEqual(plan.notes[0].text, '🚨 OFFICIAL STINKY ALERT 🚨');
+      assert.strictEqual(plan.stickers[0].assetId, 'sticker-sparkles');
+    } finally {
+      global.fetch = origFetch;
+    }
+  });
+
+  await test('generateCanvasAssistPlan catches subrequest timeout and throws clean busy server error', async () => {
+    const origFetch = global.fetch;
+    global.fetch = async () => {
+      const abortErr = new Error('The operation was aborted due to timeout');
+      abortErr.name = 'TimeoutError';
+      throw abortErr;
+    };
+
+    try {
+      await assert.rejects(async () => {
+        await generateCanvasAssistPlan({
+          prompt: 'ragebait website for stinky gf',
+          width: 390,
+          height: 600,
+        }, testEnv);
+      }, (err) => {
+        assert.strictEqual(err.message, 'Server is currently busy. Please try again in a few moments.');
+        return true;
+      });
+    } finally {
+      global.fetch = origFetch;
+    }
+  });
+
+  await test('generateCanvasFromDoodle catches response body stream timeout and throws clean busy server error', async () => {
+    const origFetch = global.fetch;
+    global.fetch = async () => {
+      return {
+        ok: true,
+        status: 200,
+        text: async () => {
+          const timeoutErr = new Error('The operation was aborted due to timeout');
+          timeoutErr.name = 'TimeoutError';
+          throw timeoutErr;
+        },
+      };
+    };
+
+    try {
+      await assert.rejects(async () => {
+        await generateCanvasFromDoodle({
+          snapshotBase64: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+        }, testEnv);
+      }, (err) => {
+        assert.strictEqual(err.message, 'Server is currently busy. Please try again in a few moments.');
+        return true;
+      });
+    } finally {
+      global.fetch = origFetch;
+    }
+  });
+
+  await test('generateCanvasAssistPlan catches response body stream timeout and throws clean busy server error', async () => {
+    const origFetch = global.fetch;
+    global.fetch = async () => {
+      return {
+        ok: true,
+        status: 200,
+        text: async () => {
+          const timeoutErr = new Error('The operation was aborted due to timeout');
+          timeoutErr.name = 'TimeoutError';
+          throw timeoutErr;
+        },
+      };
+    };
+
+    try {
+      await assert.rejects(async () => {
+        await generateCanvasAssistPlan({
+          prompt: 'test prompt',
+          width: 390,
+          height: 600,
+        }, testEnv);
+      }, (err) => {
+        assert.strictEqual(err.message, 'Server is currently busy. Please try again in a few moments.');
+        return true;
+      });
+    } finally {
+      global.fetch = origFetch;
+    }
+  });
+
+  await test('generateCanvasAssistPlan parses JSON wrapped in markdown fences with conversational preamble and postscript', async () => {
+    const origFetch = global.fetch;
+    global.fetch = async () => {
+      return new Response(JSON.stringify({
+        candidates: [{
+          content: {
+            parts: [
+              { thought: true, text: 'Thinking about the layout design...' },
+              { text: 'Here is the adorable layout you asked for!\n```json\n{\n  "strokes": [],\n  "notes": [{"text": "Hello Bee World", "x": 50, "y": 80}],\n  "stickers": [{"assetId": "sticker-star", "x": 90, "y": 110}]\n}\n```\nHope you love it!' }
+            ]
+          },
+          finishReason: 'STOP'
+        }]
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    };
+
+    try {
+      const plan = await generateCanvasAssistPlan({
+        prompt: 'bee world',
+        width: 390,
+        height: 600,
+      }, testEnv);
+
+      assert.strictEqual(plan.notes[0].text, 'Hello Bee World');
+      assert.strictEqual(plan.stickers[0].assetId, 'sticker-star');
+    } finally {
+      global.fetch = origFetch;
+    }
+  });
+
+  await test('POST /api/assist rejects prompts exceeding 2000 characters with 400', async () => {
+    const devEnv = { ...testEnv, DEV_BYPASS_AUTH: 'true' };
+    const longPrompt = 'a'.repeat(2001);
+    const req = new Request('https://worker.test/api/assist', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer mock-token-uid-gf-authorized-uid-12345',
+      },
+      body: JSON.stringify({
+        prompt: longPrompt,
+        width: 390,
+        height: 600,
+      }),
+    });
+    const res = await workerDefault.fetch(req, devEnv);
+    assert.strictEqual(res.status, 400);
+    const data = await res.json();
+    assert.match(data.error, /exceeds maximum length/);
+  });
+
   // ==========================================
   // SECTION 3: GITHUB COMMIT HANDLER TESTS (Real Implementation)
   // ==========================================

@@ -430,9 +430,14 @@ export default {
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         console.error('[Worker Generate Error]:', message);
-        const isBusy = message.includes('Server is currently busy');
+        const lowerMsg = message.toLowerCase();
+        const isBusy =
+          message.includes('Server is currently busy') ||
+          lowerMsg.includes('timeout') ||
+          lowerMsg.includes('timed out') ||
+          lowerMsg.includes('aborted');
         return jsonResponse(
-          { error: isBusy ? message : `Generation failed: ${message}` },
+          { error: isBusy ? 'Server is currently busy. Please try again in a few moments.' : `Generation failed: ${message}` },
           isBusy ? 503 : 502,
           env,
           {},
@@ -594,14 +599,23 @@ export default {
         return jsonResponse({ error: 'Missing required field: prompt' }, 400, env, {}, origin);
       }
 
+      if (body.prompt.length > 2000) {
+        return jsonResponse({ error: 'Prompt exceeds maximum length of 2000 characters' }, 400, env, {}, origin);
+      }
+
       try {
         const assistPlan = await generateCanvasAssistPlan(body, env);
         return jsonResponse(assistPlan, 200, env, {}, origin);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        const isBusy = message.includes('Server is currently busy');
+        const lowerMsg = message.toLowerCase();
+        const isBusy =
+          message.includes('Server is currently busy') ||
+          lowerMsg.includes('timeout') ||
+          lowerMsg.includes('timed out') ||
+          lowerMsg.includes('aborted');
         return jsonResponse(
-          { error: isBusy ? message : `Nerd Assist failed: ${message}` },
+          { error: isBusy ? 'Server is currently busy. Please try again in a few moments.' : `Nerd Assist failed: ${message}` },
           isBusy ? 503 : 502,
           env,
           {},

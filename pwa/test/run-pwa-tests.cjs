@@ -188,6 +188,26 @@ async function runTestSuite() {
     assert.match(appContent, /z-\[70\]/, 'Error notification toast must use z-[70] to stay above modal');
   });
 
+  await test('App handleRunNerdAssist surfaces assist errors properly and does not swallow failures with buildNerdAssistPlan', () => {
+    assert.match(appContent, /callAssistApi\(/, 'handleRunNerdAssist must call callAssistApi');
+    assert.match(appContent, /resolveAiAssistPlan\(/, 'handleRunNerdAssist must resolve AI plan');
+    assert.strictEqual(
+      appContent.includes('buildNerdAssistPlan'),
+      false,
+      'App.tsx must not silently fall back to hardcoded buildNerdAssistPlan presets on /api/assist failure'
+    );
+    assert.match(
+      appContent,
+      /plan\.notes\.length === 0 && plan\.strokes\.length === 0 && plan\.stickers\.length === 0/,
+      'handleRunNerdAssist must check notes, strokes, and stickers before considering plan empty'
+    );
+    assert.match(
+      appContent,
+      /handleVibecode[\s\S]*?message\.includes\('503'\)\s*\|\|\s*message\.includes\('429'\)/,
+      'handleVibecode must handle 503 and 429 status codes as busy server state'
+    );
+  });
+
   // 6. Photo Upload Pre-Flight Validation & On-Device Optimization Contracts
   console.log('\n--- 6. Photo Upload Pre-Flight Validation & On-Device Optimization Contracts ---');
 

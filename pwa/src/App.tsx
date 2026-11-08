@@ -10,8 +10,6 @@ import { PreviewModal } from './components/PreviewModal';
 import { AuthModal } from './components/AuthModal';
 import {
   NerdAssistModal,
-  NerdAssistPlan,
-  buildNerdAssistPlan,
   resolveAiAssistPlan,
 } from './components/NerdAssistModal';
 import { 
@@ -271,7 +269,7 @@ export const App: React.FC = () => {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error('❌ [PWA Generation Error]:', err);
-      const isBusy = message.includes('Server is currently busy');
+      const isBusy = message.includes('Server is currently busy') || message.includes('503') || message.includes('429');
       setErrorNotification(
         isBusy
           ? 'Server is currently busy. Please try again in a few moments.'
@@ -307,23 +305,15 @@ export const App: React.FC = () => {
     const delay = (ms: number) => new Promise((res) => setTimeout(res, ms));
 
     try {
-      let plan: NerdAssistPlan;
-      try {
-        const aiResponse = await callAssistApi({
-          prompt,
-          width: dims.width,
-          height: dims.height,
-          idToken: currentToken,
-        });
-        const resolved = resolveAiAssistPlan(aiResponse, dims);
-        if (resolved.notes.length > 0 || resolved.strokes.length > 0) {
-          plan = resolved;
-        } else {
-          plan = buildNerdAssistPlan(prompt, dims);
-        }
-      } catch {
-        // Fallback if Worker hasn't deployed /api/assist yet
-        plan = buildNerdAssistPlan(prompt, dims);
+      const aiResponse = await callAssistApi({
+        prompt,
+        width: dims.width,
+        height: dims.height,
+        idToken: currentToken,
+      });
+      const plan = resolveAiAssistPlan(aiResponse, dims);
+      if (plan.notes.length === 0 && plan.strokes.length === 0 && plan.stickers.length === 0) {
+        throw new Error('Nerd Assist did not return any layout elements. Please try again.');
       }
 
       setIsNerdAssistOpen(false);
@@ -382,7 +372,7 @@ export const App: React.FC = () => {
       setAssistStatusText('');
       isBusyRef.current = false;
       const message = err instanceof Error ? err.message : String(err);
-      const isBusy = message.includes('Server is currently busy');
+      const isBusy = message.includes('Server is currently busy') || message.includes('503') || message.includes('429');
       setErrorNotification(
         isBusy
           ? 'Server is currently busy. Please try again in a few moments.'

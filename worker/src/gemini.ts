@@ -253,70 +253,61 @@ export async function generateCanvasFromDoodle(
   ];
 
   const model = env.GEMINI_MODEL || PRIMARY_MODEL;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 
-  const attemptGenerate = async (includeThinking: boolean) => {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
-    const generationConfig: Record<string, unknown> = {
-      temperature: 0.4,
-      topP: 0.95,
-      maxOutputTokens: 8192,
-    };
-
-    if (includeThinking) {
-      generationConfig.thinkingConfig = {
+  const requestBody = {
+    contents: [
+      {
+        role: 'user',
+        parts: baseParts,
+      },
+    ],
+    generationConfig: {
+      maxOutputTokens: 16384,
+      thinkingConfig: {
         thinkingLevel: 'LOW',
-      };
-    }
+      },
+    },
+  };
 
-    const requestBody = {
-      contents: [
-        {
-          role: 'user',
-          parts: baseParts,
-        },
-      ],
-      generationConfig,
-    };
-
-    return await fetch(url, {
+  let response: Response;
+  let responseText: string;
+  try {
+    response = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'x-goog-api-key': env.GEMINI_API_KEY,
       },
       body: JSON.stringify(requestBody),
+      signal: AbortSignal.timeout(60000),
     });
-  };
-
-  let response: Response;
-  try {
-    response = await attemptGenerate(true);
-
-    // If Google rejects thinkingConfig (e.g. 400 invalid field for older models), retry without thinkingConfig
-    if (!response.ok && response.status === 400) {
-      const errPeek = await response.clone().text().catch(() => '');
-      if (
-        errPeek.includes('thinkingConfig') ||
-        errPeek.includes('thinkingLevel') ||
-        errPeek.includes('thinking_config') ||
-        errPeek.includes('INVALID_ARGUMENT')
-      ) {
-        response = await attemptGenerate(false);
-      }
-    }
+    responseText = await response.text();
   } catch (networkErr) {
     const netMsg = networkErr instanceof Error ? networkErr.message : String(networkErr);
     console.error(`[Worker Gemini Network Error] Model ${model}:`, netMsg);
+    if (
+      (networkErr instanceof Error &&
+        (networkErr.name === 'AbortError' ||
+          networkErr.name === 'TimeoutError' ||
+          netMsg.toLowerCase().includes('aborted') ||
+          netMsg.toLowerCase().includes('timeout') ||
+          netMsg.toLowerCase().includes('timed out'))) ||
+      (!(networkErr instanceof Error) &&
+        (String(networkErr).toLowerCase().includes('aborted') ||
+          String(networkErr).toLowerCase().includes('timeout')))
+    ) {
+      throw new Error('Server is currently busy. Please try again in a few moments.');
+    }
     throw new Error(`Gemini network connection error: ${netMsg}`);
   }
 
   if (!response.ok) {
-    const errorText = await response.text();
-    console.error(`[Worker Gemini Error] Model ${model} failed (${response.status}): ${errorText}`);
+    console.error(`[Worker Gemini Error] Model ${model} failed (${response.status}): ${responseText}`);
 
     const status = response.status;
     let isBusy = status === 503 || status === 429 || status === 504;
-    const upperError = errorText.toUpperCase();
+    const upperError = responseText.toUpperCase();
     if (
       upperError.includes('UNAVAILABLE') ||
       upperError.includes('RESOURCE_EXHAUSTED') ||
@@ -332,7 +323,7 @@ export async function generateCanvasFromDoodle(
     }
 
     try {
-      const errObj = JSON.parse(errorText);
+      const errObj = JSON.parse(responseText);
       const errStatus = String(errObj?.error?.status || '').toUpperCase();
       const errMsg = String(errObj?.error?.message || '').toLowerCase();
       if (
@@ -360,26 +351,36 @@ export async function generateCanvasFromDoodle(
       throw new Error('Server is currently busy. Please try again in a few moments.');
     }
 
-    throw new Error(`Gemini API error on ${model} (${status}): ${errorText}`);
+    throw new Error(`Gemini API error on ${model} (${status}): ${responseText}`);
   }
 
-  const data = (await response.json()) as {
+  let data: {
     candidates?: Array<{
       content?: {
-        parts?: Array<{ text?: string }>;
+        parts?: Array<{ text?: string; thought?: boolean }>;
       };
       finishReason?: string;
     }>;
+    promptFeedback?: {
+      blockReason?: string;
+    };
   };
+  try {
+    data = JSON.parse(responseText);
+  } catch (parseErr) {
+    throw new Error(`Gemini ${model} returned unparseable API response: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`);
+  }
 
   const candidate = data.candidates?.[0];
   if (candidate?.finishReason === 'MAX_TOKENS') {
     throw new Error(`Gemini generation on ${model} reached max token limit and was truncated.`);
   }
 
-  const rawGeneratedHtml = candidate?.content?.parts?.[0]?.text;
+  const parts = candidate?.content?.parts || [];
+  const textParts = parts.filter((part) => !part.thought && typeof part.text === 'string');
+  const rawGeneratedHtml = textParts.map((part) => part.text).join('').trim();
   if (!rawGeneratedHtml) {
-    const reason = candidate?.finishReason || 'NO_CANDIDATE';
+    const reason = candidate?.finishReason || data.promptFeedback?.blockReason || 'NO_CANDIDATE';
     throw new Error(`Gemini ${model} returned an empty response candidate (finishReason: ${reason})`);
   }
 
@@ -479,6 +480,7 @@ Return ONLY valid JSON matching this exact structure (no markdown fences, no ext
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 
   let response: Response;
+  let responseText: string;
   try {
     response = await fetch(url, {
       method: 'POST',
@@ -489,23 +491,40 @@ Return ONLY valid JSON matching this exact structure (no markdown fences, no ext
       body: JSON.stringify({
         contents: [{ role: 'user', parts: [{ text: systemPrompt }] }],
         generationConfig: {
-          temperature: 0.75,
-          maxOutputTokens: 2048,
+          maxOutputTokens: 8192,
           responseMimeType: 'application/json',
+          thinkingConfig: {
+            thinkingLevel: 'LOW',
+          },
         },
       }),
+      signal: AbortSignal.timeout(20000),
     });
+    responseText = await response.text();
   } catch (networkErr) {
     const netMsg = networkErr instanceof Error ? networkErr.message : String(networkErr);
+    console.error(`[Worker Gemini Assist Network Error] Model ${model}:`, netMsg);
+    if (
+      (networkErr instanceof Error &&
+        (networkErr.name === 'AbortError' ||
+          networkErr.name === 'TimeoutError' ||
+          netMsg.toLowerCase().includes('aborted') ||
+          netMsg.toLowerCase().includes('timeout') ||
+          netMsg.toLowerCase().includes('timed out'))) ||
+      (!(networkErr instanceof Error) &&
+        (String(networkErr).toLowerCase().includes('aborted') ||
+          String(networkErr).toLowerCase().includes('timeout')))
+    ) {
+      throw new Error('Server is currently busy. Please try again in a few moments.');
+    }
     throw new Error(`Gemini assist network error: ${netMsg}`);
   }
 
   if (!response.ok) {
-    const errText = await response.text();
-    console.error(`[Worker Gemini Assist Error] Model ${model} (${response.status}): ${errText}`);
+    console.error(`[Worker Gemini Assist Error] Model ${model} (${response.status}): ${responseText}`);
     const status = response.status;
     let isBusy = status === 503 || status === 429 || status === 504;
-    const upperError = errText.toUpperCase();
+    const upperError = responseText.toUpperCase();
     if (
       upperError.includes('UNAVAILABLE') ||
       upperError.includes('RESOURCE_EXHAUSTED') ||
@@ -521,7 +540,7 @@ Return ONLY valid JSON matching this exact structure (no markdown fences, no ext
     }
 
     try {
-      const errObj = JSON.parse(errText);
+      const errObj = JSON.parse(responseText);
       const errStatus = String(errObj?.error?.status || '').toUpperCase();
       const errMsg = String(errObj?.error?.message || '').toLowerCase();
       if (
@@ -549,15 +568,57 @@ Return ONLY valid JSON matching this exact structure (no markdown fences, no ext
       throw new Error('Server is currently busy. Please try again in a few moments.');
     }
 
-    throw new Error(`Gemini ${model} assist error (${response.status}): ${errText}`);
+    throw new Error(`Gemini ${model} assist error (${response.status}): ${responseText}`);
   }
 
-  const data = (await response.json()) as {
-    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+  let data: {
+    candidates?: Array<{
+      content?: {
+        parts?: Array<{ text?: string; thought?: boolean }>;
+      };
+      finishReason?: string;
+    }>;
+    promptFeedback?: {
+      blockReason?: string;
+    };
   };
-  const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-  const cleanedJson = rawText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/g, '').trim();
-  const parsed = JSON.parse(cleanedJson) as AssistResponse;
+  try {
+    data = JSON.parse(responseText);
+  } catch (parseErr) {
+    throw new Error(`Gemini ${model} returned unparseable API response: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`);
+  }
+
+  const candidate = data.candidates?.[0];
+  if (candidate?.finishReason === 'MAX_TOKENS') {
+    throw new Error(`Gemini assist on ${model} reached max token limit and was truncated.`);
+  }
+
+  const parts = candidate?.content?.parts || [];
+  const textParts = parts.filter((part) => !part.thought && typeof part.text === 'string');
+  const rawText = textParts.map((part) => part.text).join('').trim();
+  if (!rawText) {
+    const reason = candidate?.finishReason || data.promptFeedback?.blockReason || 'NO_CANDIDATE';
+    throw new Error(`Gemini ${model} assist returned an empty response candidate (finishReason: ${reason})`);
+  }
+
+  let jsonString = rawText.trim();
+  const fenceMatch = jsonString.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (fenceMatch) {
+    jsonString = fenceMatch[1].trim();
+  } else {
+    const braceMatch = jsonString.match(/(\{[\s\S]*\})/);
+    if (braceMatch) {
+      jsonString = braceMatch[1].trim();
+    }
+  }
+
+  let parsed: AssistResponse;
+  try {
+    parsed = JSON.parse(jsonString) as AssistResponse;
+  } catch (jsonErr) {
+    console.error(`[Worker Gemini Assist JSON Parse Error] Model ${model}:`, rawText);
+    throw new Error(`Gemini ${model} returned invalid JSON layout: ${jsonErr instanceof Error ? jsonErr.message : String(jsonErr)}`);
+  }
 
   const safeStrokes = (Array.isArray(parsed.strokes) ? parsed.strokes.slice(0, 10) : [])
     .filter((s) => s && Array.isArray(s.points) && s.points.length >= 2)
