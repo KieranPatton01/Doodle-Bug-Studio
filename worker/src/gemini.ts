@@ -7,10 +7,6 @@ import { Env, GenerateRequest, GenerateResponse, AssistRequest, AssistResponse }
 import { validateCanvasHtml } from './validator';
 
 const PRIMARY_MODEL = 'gemini-3.8-flash';
-const FALLBACK_MODELS = [
-  'gemini-3-flash-preview',
-  'gemini-2.5-flash',
-];
 
 /**
  * Builds the strict system prompt and generation guardrails
@@ -256,162 +252,149 @@ export async function generateCanvasFromDoodle(
     },
   ];
 
-  const configuredModel = env.GEMINI_MODEL ? [env.GEMINI_MODEL] : [];
-  const modelsToTry = [...configuredModel, PRIMARY_MODEL, ...FALLBACK_MODELS];
-  // Deduplicate
-  const uniqueModels = Array.from(new Set(modelsToTry));
-  let lastError: Error | null = null;
+  const model = env.GEMINI_MODEL || PRIMARY_MODEL;
 
-  for (const model of uniqueModels) {
-    const attemptGenerate = async (includeThinking: boolean) => {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
-      const generationConfig: Record<string, unknown> = {
-        temperature: 0.4,
-        topP: 0.95,
-        maxOutputTokens: 8192,
-      };
-
-      if (includeThinking) {
-        generationConfig.thinkingConfig = {
-          thinkingLevel: 'LOW',
-        };
-      }
-
-      const requestBody = {
-        contents: [
-          {
-            role: 'user',
-            parts: baseParts,
-          },
-        ],
-        generationConfig,
-      };
-
-      return await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': env.GEMINI_API_KEY,
-        },
-        body: JSON.stringify(requestBody),
-      });
+  const attemptGenerate = async (includeThinking: boolean) => {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+    const generationConfig: Record<string, unknown> = {
+      temperature: 0.4,
+      topP: 0.95,
+      maxOutputTokens: 8192,
     };
 
-    try {
-      let response = await attemptGenerate(true);
-
-      // If Google rejects thinkingConfig (e.g. 400 invalid field for older models), retry without thinkingConfig
-      if (!response.ok && response.status === 400) {
-        const errPeek = await response.clone().text().catch(() => '');
-        if (
-          errPeek.includes('thinkingConfig') ||
-          errPeek.includes('thinkingLevel') ||
-          errPeek.includes('thinking_config') ||
-          errPeek.includes('INVALID_ARGUMENT')
-        ) {
-          response = await attemptGenerate(false);
-        }
-      }
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`[Worker Gemini Error] Model ${model} failed (${response.status}): ${errorText}`);
-
-        const status = response.status;
-        let isModelUnsupported = status === 404 || status === 503 || status === 429;
-        const upperError = errorText.toUpperCase();
-        if (
-          upperError.includes('UNAVAILABLE') ||
-          upperError.includes('RESOURCE_EXHAUSTED') ||
-          upperError.includes('OVERLOADED') ||
-          upperError.includes('NOT_FOUND') ||
-          upperError.includes('QUOTA')
-        ) {
-          isModelUnsupported = true;
-        }
-
-        try {
-          const errObj = JSON.parse(errorText);
-          const errStatus = String(errObj?.error?.status || '').toUpperCase();
-          const errMsg = String(errObj?.error?.message || '').toLowerCase();
-          if (
-            errStatus === 'NOT_FOUND' ||
-            errStatus === 'UNAVAILABLE' ||
-            errStatus === 'RESOURCE_EXHAUSTED' ||
-            errMsg.includes('not found') ||
-            errMsg.includes('unavailable') ||
-            errMsg.includes('overloaded') ||
-            errMsg.includes('quota')
-          ) {
-            isModelUnsupported = true;
-          }
-        } catch {
-          // not json
-        }
-
-        if (isModelUnsupported) {
-          lastError = new Error(`Gemini model ${model} unavailable (${status}): ${errorText}`);
-          continue;
-        }
-        throw new Error(`Gemini API error on ${model} (${status}): ${errorText}`);
-      }
-
-      const data = (await response.json()) as {
-        candidates?: Array<{
-          content?: {
-            parts?: Array<{ text?: string }>;
-          };
-          finishReason?: string;
-        }>;
+    if (includeThinking) {
+      generationConfig.thinkingConfig = {
+        thinkingLevel: 'LOW',
       };
+    }
 
-      const candidate = data.candidates?.[0];
-      if (candidate?.finishReason === 'MAX_TOKENS') {
-        throw new Error(`Gemini generation on ${model} reached max token limit and was truncated.`);
-      }
+    const requestBody = {
+      contents: [
+        {
+          role: 'user',
+          parts: baseParts,
+        },
+      ],
+      generationConfig,
+    };
 
-      const rawGeneratedHtml = candidate?.content?.parts?.[0]?.text;
-      if (!rawGeneratedHtml) {
-        const reason = candidate?.finishReason || 'NO_CANDIDATE';
-        throw new Error(`Gemini ${model} returned an empty response candidate (finishReason: ${reason})`);
-      }
+    return await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': env.GEMINI_API_KEY,
+      },
+      body: JSON.stringify(requestBody),
+    });
+  };
 
-      const finalHtml = sanitizeHtmlResponse(rawGeneratedHtml);
+  let response: Response;
+  try {
+    response = await attemptGenerate(true);
 
-      // Enforce the exact same validation rules at generate time so preview and publish never disagree
-      const validation = validateCanvasHtml(finalHtml);
-      if (!validation.valid) {
-        throw new Error(`Generated canvas HTML from ${model} failed validation: ${validation.error}`);
-      }
-
-      return {
-        html: finalHtml,
-        model: model,
-      };
-    } catch (err) {
-      lastError = err instanceof Error ? err : new Error(String(err));
-      // If error is not a model availability/quota issue, re-throw immediately
-      const lowerMsg = lastError.message.toLowerCase();
-      const isModelIssue =
-        lowerMsg.includes('404') ||
-        lowerMsg.includes('503') ||
-        lowerMsg.includes('429') ||
-        lowerMsg.includes('unavailable') ||
-        lowerMsg.includes('not_found') ||
-        lowerMsg.includes('not found') ||
-        lowerMsg.includes('resource_exhausted') ||
-        lowerMsg.includes('overloaded');
-      if (!isModelIssue) {
-        throw lastError;
+    // If Google rejects thinkingConfig (e.g. 400 invalid field for older models), retry without thinkingConfig
+    if (!response.ok && response.status === 400) {
+      const errPeek = await response.clone().text().catch(() => '');
+      if (
+        errPeek.includes('thinkingConfig') ||
+        errPeek.includes('thinkingLevel') ||
+        errPeek.includes('thinking_config') ||
+        errPeek.includes('INVALID_ARGUMENT')
+      ) {
+        response = await attemptGenerate(false);
       }
     }
+  } catch (networkErr) {
+    const netMsg = networkErr instanceof Error ? networkErr.message : String(networkErr);
+    console.error(`[Worker Gemini Network Error] Model ${model}:`, netMsg);
+    throw new Error(`Gemini network connection error: ${netMsg}`);
   }
 
-  const triedModels = uniqueModels.join(', ');
-  throw (
-    lastError ||
-    new Error(`All Gemini models failed to respond. Tried: ${triedModels}`)
-  );
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error(`[Worker Gemini Error] Model ${model} failed (${response.status}): ${errorText}`);
+
+    const status = response.status;
+    let isBusy = status === 503 || status === 429 || status === 504;
+    const upperError = errorText.toUpperCase();
+    if (
+      upperError.includes('UNAVAILABLE') ||
+      upperError.includes('RESOURCE_EXHAUSTED') ||
+      upperError.includes('OVERLOADED') ||
+      upperError.includes('QUOTA') ||
+      upperError.includes('RATE_LIMIT') ||
+      upperError.includes('RATE LIMIT') ||
+      upperError.includes('BUSY') ||
+      upperError.includes('CAPACITY') ||
+      upperError.includes('TRY AGAIN')
+    ) {
+      isBusy = true;
+    }
+
+    try {
+      const errObj = JSON.parse(errorText);
+      const errStatus = String(errObj?.error?.status || '').toUpperCase();
+      const errMsg = String(errObj?.error?.message || '').toLowerCase();
+      if (
+        errStatus === 'UNAVAILABLE' ||
+        errStatus === 'RESOURCE_EXHAUSTED' ||
+        errStatus === 'OVERLOADED' ||
+        errMsg.includes('unavailable') ||
+        errMsg.includes('overloaded') ||
+        errMsg.includes('quota') ||
+        errMsg.includes('rate limit') ||
+        errMsg.includes('rate_limit') ||
+        errMsg.includes('resource exhausted') ||
+        errMsg.includes('resource_exhausted') ||
+        errMsg.includes('busy') ||
+        errMsg.includes('capacity') ||
+        errMsg.includes('try again')
+      ) {
+        isBusy = true;
+      }
+    } catch {
+      // not json
+    }
+
+    if (isBusy) {
+      throw new Error('Server is currently busy. Please try again in a few moments.');
+    }
+
+    throw new Error(`Gemini API error on ${model} (${status}): ${errorText}`);
+  }
+
+  const data = (await response.json()) as {
+    candidates?: Array<{
+      content?: {
+        parts?: Array<{ text?: string }>;
+      };
+      finishReason?: string;
+    }>;
+  };
+
+  const candidate = data.candidates?.[0];
+  if (candidate?.finishReason === 'MAX_TOKENS') {
+    throw new Error(`Gemini generation on ${model} reached max token limit and was truncated.`);
+  }
+
+  const rawGeneratedHtml = candidate?.content?.parts?.[0]?.text;
+  if (!rawGeneratedHtml) {
+    const reason = candidate?.finishReason || 'NO_CANDIDATE';
+    throw new Error(`Gemini ${model} returned an empty response candidate (finishReason: ${reason})`);
+  }
+
+  const finalHtml = sanitizeHtmlResponse(rawGeneratedHtml);
+
+  // Enforce the exact same validation rules at generate time so preview and publish never disagree
+  const validation = validateCanvasHtml(finalHtml);
+  if (!validation.valid) {
+    throw new Error(`Generated canvas HTML from ${model} failed validation: ${validation.error}`);
+  }
+
+  return {
+    html: finalHtml,
+    model: model,
+  };
 }
 
 /**
@@ -492,95 +475,137 @@ Return ONLY valid JSON matching this exact structure (no markdown fences, no ext
   ]
 }`;
 
-  const configuredModel = env.GEMINI_MODEL ? [env.GEMINI_MODEL] : [];
-  const uniqueModels = Array.from(new Set([...configuredModel, PRIMARY_MODEL, ...FALLBACK_MODELS]));
-  let lastError: Error | null = null;
+  const model = env.GEMINI_MODEL || PRIMARY_MODEL;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 
-  for (const model of uniqueModels) {
-    try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': env.GEMINI_API_KEY,
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': env.GEMINI_API_KEY,
+      },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: systemPrompt }] }],
+        generationConfig: {
+          temperature: 0.75,
+          maxOutputTokens: 2048,
+          responseMimeType: 'application/json',
         },
-        body: JSON.stringify({
-          contents: [{ role: 'user', parts: [{ text: systemPrompt }] }],
-          generationConfig: {
-            temperature: 0.75,
-            maxOutputTokens: 2048,
-            responseMimeType: 'application/json',
-          },
-        }),
-      });
-
-      if (!response.ok) {
-        const errText = await response.text();
-        lastError = new Error(`Gemini ${model} assist error (${response.status}): ${errText}`);
-        continue;
-      }
-
-      const data = (await response.json()) as {
-        candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-      };
-      const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-      const cleanedJson = rawText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/g, '').trim();
-      const parsed = JSON.parse(cleanedJson) as AssistResponse;
-
-      const safeStrokes = (Array.isArray(parsed.strokes) ? parsed.strokes.slice(0, 10) : [])
-        .filter((s) => s && Array.isArray(s.points) && s.points.length >= 2)
-        .map((s) => ({
-          tool: (s.tool === 'marker' ? 'marker' : 'brush') as 'brush' | 'marker',
-          color: /^#[0-9a-fA-F]{6}$/.test(String(s.color || '')) ? String(s.color) : '#0f172a',
-          size: typeof s.size === 'number' && Number.isFinite(s.size) ? Math.max(2, Math.min(28, Math.round(s.size))) : 5,
-          points: s.points
-            .slice(0, 40)
-            .filter((pt) => pt && typeof pt.x === 'number' && typeof pt.y === 'number')
-            .map((pt) => ({
-              x: Math.max(6, Math.min(w - 6, Math.round(pt.x))),
-              y: Math.max(6, Math.min(h - 6, Math.round(pt.y))),
-            })),
-        }))
-        .filter((s) => s.points.length >= 2);
-
-      const safeNotes = (Array.isArray(parsed.notes) ? parsed.notes.slice(0, 6) : [])
-        .filter((n) => n && typeof n.text === 'string')
-        .map((n) => {
-          // Strip any HTML tags, script keywords, or prompt delimiters so notes are 100% inert display text
-          const cleanNoteText = n.text
-            .replace(/<\/?[a-z][^>]*>/gi, '')
-            .replace(/javascript\s*:/gi, '')
-            .replace(/<<<|>>>/g, '')
-            .trim()
-            .slice(0, 120);
-          return {
-            text: cleanNoteText,
-            x: typeof n.x === 'number' && Number.isFinite(n.x) ? Math.max(16, Math.min(w - 150, Math.round(n.x))) : 60,
-            y: typeof n.y === 'number' && Number.isFinite(n.y) ? Math.max(36, Math.min(h - 90, Math.round(n.y))) : 100,
-            color: /^#[0-9a-fA-F]{6}$/.test(String(n.color || '')) ? String(n.color) : '#0f172a',
-            fontSize: typeof n.fontSize === 'number' && Number.isFinite(n.fontSize) ? Math.max(12, Math.min(22, Math.round(n.fontSize))) : 16,
-          };
-        })
-        .filter((n) => n.text.length > 0);
-
-      const safeStickers = (Array.isArray(parsed.stickers) ? parsed.stickers.slice(0, 8) : [])
-        .filter((st) => st && typeof st.assetId === 'string')
-        .map((st) => ({
-          assetId: st.assetId.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 40),
-          x: typeof st.x === 'number' && Number.isFinite(st.x) ? Math.max(10, Math.min(w - 90, Math.round(st.x))) : 100,
-          y: typeof st.y === 'number' && Number.isFinite(st.y) ? Math.max(10, Math.min(h - 80, Math.round(st.y))) : 120,
-        }));
-
-      return {
-        strokes: safeStrokes,
-        notes: safeNotes,
-        stickers: safeStickers,
-      };
-    } catch (err) {
-      lastError = err instanceof Error ? err : new Error(String(err));
-    }
+      }),
+    });
+  } catch (networkErr) {
+    const netMsg = networkErr instanceof Error ? networkErr.message : String(networkErr);
+    throw new Error(`Gemini assist network error: ${netMsg}`);
   }
 
-  throw lastError || new Error('Failed to generate Nerd Assist layout');
+  if (!response.ok) {
+    const errText = await response.text();
+    console.error(`[Worker Gemini Assist Error] Model ${model} (${response.status}): ${errText}`);
+    const status = response.status;
+    let isBusy = status === 503 || status === 429 || status === 504;
+    const upperError = errText.toUpperCase();
+    if (
+      upperError.includes('UNAVAILABLE') ||
+      upperError.includes('RESOURCE_EXHAUSTED') ||
+      upperError.includes('OVERLOADED') ||
+      upperError.includes('QUOTA') ||
+      upperError.includes('RATE_LIMIT') ||
+      upperError.includes('RATE LIMIT') ||
+      upperError.includes('BUSY') ||
+      upperError.includes('CAPACITY') ||
+      upperError.includes('TRY AGAIN')
+    ) {
+      isBusy = true;
+    }
+
+    try {
+      const errObj = JSON.parse(errText);
+      const errStatus = String(errObj?.error?.status || '').toUpperCase();
+      const errMsg = String(errObj?.error?.message || '').toLowerCase();
+      if (
+        errStatus === 'UNAVAILABLE' ||
+        errStatus === 'RESOURCE_EXHAUSTED' ||
+        errStatus === 'OVERLOADED' ||
+        errMsg.includes('unavailable') ||
+        errMsg.includes('overloaded') ||
+        errMsg.includes('quota') ||
+        errMsg.includes('rate limit') ||
+        errMsg.includes('rate_limit') ||
+        errMsg.includes('resource exhausted') ||
+        errMsg.includes('resource_exhausted') ||
+        errMsg.includes('busy') ||
+        errMsg.includes('capacity') ||
+        errMsg.includes('try again')
+      ) {
+        isBusy = true;
+      }
+    } catch {
+      // not json
+    }
+
+    if (isBusy) {
+      throw new Error('Server is currently busy. Please try again in a few moments.');
+    }
+
+    throw new Error(`Gemini ${model} assist error (${response.status}): ${errText}`);
+  }
+
+  const data = (await response.json()) as {
+    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+  };
+  const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  const cleanedJson = rawText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/g, '').trim();
+  const parsed = JSON.parse(cleanedJson) as AssistResponse;
+
+  const safeStrokes = (Array.isArray(parsed.strokes) ? parsed.strokes.slice(0, 10) : [])
+    .filter((s) => s && Array.isArray(s.points) && s.points.length >= 2)
+    .map((s) => ({
+      tool: (s.tool === 'marker' ? 'marker' : 'brush') as 'brush' | 'marker',
+      color: /^#[0-9a-fA-F]{6}$/.test(String(s.color || '')) ? String(s.color) : '#0f172a',
+      size: typeof s.size === 'number' && Number.isFinite(s.size) ? Math.max(2, Math.min(28, Math.round(s.size))) : 5,
+      points: s.points
+        .slice(0, 40)
+        .filter((pt) => pt && typeof pt.x === 'number' && typeof pt.y === 'number')
+        .map((pt) => ({
+          x: Math.max(6, Math.min(w - 6, Math.round(pt.x))),
+          y: Math.max(6, Math.min(h - 6, Math.round(pt.y))),
+        })),
+    }))
+    .filter((s) => s.points.length >= 2);
+
+  const safeNotes = (Array.isArray(parsed.notes) ? parsed.notes.slice(0, 6) : [])
+    .filter((n) => n && typeof n.text === 'string')
+    .map((n) => {
+      // Strip any HTML tags, script keywords, or prompt delimiters so notes are 100% inert display text
+      const cleanNoteText = n.text
+        .replace(/<\/?[a-z][^>]*>/gi, '')
+        .replace(/javascript\s*:/gi, '')
+        .replace(/<<<|>>>/g, '')
+        .trim()
+        .slice(0, 120);
+      return {
+        text: cleanNoteText,
+        x: typeof n.x === 'number' && Number.isFinite(n.x) ? Math.max(16, Math.min(w - 150, Math.round(n.x))) : 60,
+        y: typeof n.y === 'number' && Number.isFinite(n.y) ? Math.max(36, Math.min(h - 90, Math.round(n.y))) : 100,
+        color: /^#[0-9a-fA-F]{6}$/.test(String(n.color || '')) ? String(n.color) : '#0f172a',
+        fontSize: typeof n.fontSize === 'number' && Number.isFinite(n.fontSize) ? Math.max(12, Math.min(22, Math.round(n.fontSize))) : 16,
+      };
+    })
+    .filter((n) => n.text.length > 0);
+
+  const safeStickers = (Array.isArray(parsed.stickers) ? parsed.stickers.slice(0, 8) : [])
+    .filter((st) => st && typeof st.assetId === 'string')
+    .map((st) => ({
+      assetId: st.assetId.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 40),
+      x: typeof st.x === 'number' && Number.isFinite(st.x) ? Math.max(10, Math.min(w - 90, Math.round(st.x))) : 100,
+      y: typeof st.y === 'number' && Number.isFinite(st.y) ? Math.max(10, Math.min(h - 80, Math.round(st.y))) : 120,
+    }));
+
+  return {
+    strokes: safeStrokes,
+    notes: safeNotes,
+    stickers: safeStickers,
+  };
 }

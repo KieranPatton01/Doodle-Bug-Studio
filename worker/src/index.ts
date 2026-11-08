@@ -430,7 +430,14 @@ export default {
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         console.error('[Worker Generate Error]:', message);
-        return jsonResponse({ error: `Generation failed: ${message}` }, 502, env, {}, origin);
+        const isBusy = message.includes('Server is currently busy');
+        return jsonResponse(
+          { error: isBusy ? message : `Generation failed: ${message}` },
+          isBusy ? 503 : 502,
+          env,
+          {},
+          origin
+        );
       }
     }
 
@@ -592,7 +599,14 @@ export default {
         return jsonResponse(assistPlan, 200, env, {}, origin);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        return jsonResponse({ error: `Nerd Assist failed: ${message}` }, 502, env, {}, origin);
+        const isBusy = message.includes('Server is currently busy');
+        return jsonResponse(
+          { error: isBusy ? message : `Nerd Assist failed: ${message}` },
+          isBusy ? 503 : 502,
+          env,
+          {},
+          origin
+        );
       }
     }
 

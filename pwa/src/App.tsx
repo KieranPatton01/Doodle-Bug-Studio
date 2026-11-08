@@ -61,6 +61,7 @@ export const App: React.FC = () => {
   const [publishResult, setPublishResult] = useState<PublishResult | null>(null);
   const [errorNotification, setErrorNotification] = useState<string | null>(null);
   const lastGeneratedSignatureRef = useRef<string | null>(null);
+  const isBusyRef = useRef(false);
 
   // Auth state
   const [authState, setAuthState] = useState<AuthState>({
@@ -184,13 +185,25 @@ export const App: React.FC = () => {
     notesList?: CanvasTextNote[];
     stickersList?: CanvasSticker[];
   }) => {
+    // Prevent overlapping/concurrent generation calls
+    if (isBusyRef.current && !overrideItems) return;
+    isBusyRef.current = true;
+
     const currentToken = await getFreshIdToken();
     if (!authState.isAuthenticated || !currentToken) {
+      isBusyRef.current = false;
+      setIsAssisting(false);
+      setAssistStatusText('');
       setIsAuthModalOpen(true);
       return;
     }
 
-    if (!canvasRef.current) return;
+    if (!canvasRef.current) {
+      isBusyRef.current = false;
+      setIsAssisting(false);
+      setAssistStatusText('');
+      return;
+    }
 
     const activeNotes = overrideItems?.notesList ?? textNotes;
     const activeStickers = overrideItems?.stickersList ?? stickers;
@@ -232,10 +245,17 @@ export const App: React.FC = () => {
 
       if (generateResult && lastGeneratedSignatureRef.current === canvasSignature) {
         setIsPreviewModalOpen(true);
+        isBusyRef.current = false;
+        setIsAssisting(false);
+        setAssistStatusText('');
         return;
       }
 
+      // Close preview modal and smoothly transition from isAssisting to isGenerating
+      setIsPreviewModalOpen(false);
       setIsGenerating(true);
+      setIsAssisting(false);
+      setAssistStatusText('');
       setPublishResult(null);
 
       const result = await callGenerateApi({
@@ -251,16 +271,31 @@ export const App: React.FC = () => {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error('❌ [PWA Generation Error]:', err);
-      setErrorNotification(`Oops! Your nerd got a little confused: ${message}`);
+      const isBusy = message.includes('Server is currently busy');
+      setErrorNotification(
+        isBusy
+          ? 'Server is currently busy. Please try again in a few moments.'
+          : `Oops! Your nerd got a little confused: ${message}`
+      );
     } finally {
       setIsGenerating(false);
+      setIsAssisting(false);
+      setAssistStatusText('');
+      isBusyRef.current = false;
     }
   };
 
   // Option B: Nerd Assist — Ask Gemini to design a custom layout with your tools, animate it on the canvas, and build the webpage!
   const handleRunNerdAssist = async (prompt: string) => {
+    // Prevent overlapping/concurrent generation calls
+    if (isBusyRef.current) return;
+    isBusyRef.current = true;
+
     const currentToken = await getFreshIdToken();
     if (!authState.isAuthenticated || !currentToken) {
+      isBusyRef.current = false;
+      setIsAssisting(false);
+      setAssistStatusText('');
       setIsAuthModalOpen(true);
       return;
     }
@@ -271,28 +306,28 @@ export const App: React.FC = () => {
     const dims = canvasRef.current?.getDimensions?.() || { width: 390, height: 600 };
     const delay = (ms: number) => new Promise((res) => setTimeout(res, ms));
 
-    let plan: NerdAssistPlan;
     try {
-      const aiResponse = await callAssistApi({
-        prompt,
-        width: dims.width,
-        height: dims.height,
-        idToken: currentToken,
-      });
-      const resolved = resolveAiAssistPlan(aiResponse, dims);
-      if (resolved.notes.length > 0 || resolved.strokes.length > 0) {
-        plan = resolved;
-      } else {
+      let plan: NerdAssistPlan;
+      try {
+        const aiResponse = await callAssistApi({
+          prompt,
+          width: dims.width,
+          height: dims.height,
+          idToken: currentToken,
+        });
+        const resolved = resolveAiAssistPlan(aiResponse, dims);
+        if (resolved.notes.length > 0 || resolved.strokes.length > 0) {
+          plan = resolved;
+        } else {
+          plan = buildNerdAssistPlan(prompt, dims);
+        }
+      } catch {
+        // Fallback if Worker hasn't deployed /api/assist yet
         plan = buildNerdAssistPlan(prompt, dims);
       }
-    } catch {
-      // Fallback if Worker hasn't deployed /api/assist yet
-      plan = buildNerdAssistPlan(prompt, dims);
-    }
 
-    setIsNerdAssistOpen(false);
+      setIsNerdAssistOpen(false);
 
-    try {
       // Clear previous canvas so the nerd starts on a fresh page
       canvasRef.current?.clearCanvas();
       setTextNotes([]);
@@ -335,9 +370,8 @@ export const App: React.FC = () => {
       // Let the user admire the finished doodle for a beat before triggering webpage generation
       setAssistStatusText('Doodle finished! Now building your live webpage... 🤓✨');
       await delay(550);
-      setIsAssisting(false);
-      setAssistStatusText('');
 
+      // Keep isAssisting active until handleVibecode sets isGenerating = true
       await handleVibecode({
         strokesList: plan.strokes,
         notesList: createdNotes,
@@ -346,8 +380,14 @@ export const App: React.FC = () => {
     } catch (err) {
       setIsAssisting(false);
       setAssistStatusText('');
+      isBusyRef.current = false;
       const message = err instanceof Error ? err.message : String(err);
-      setErrorNotification(`Oops! Your nerd tripped while doodling: ${message}`);
+      const isBusy = message.includes('Server is currently busy');
+      setErrorNotification(
+        isBusy
+          ? 'Server is currently busy. Please try again in a few moments.'
+          : `Oops! Your nerd tripped while doodling: ${message}`
+      );
     }
   };
 
@@ -520,7 +560,7 @@ export const App: React.FC = () => {
 
       {/* Floating Error Notification Toast */}
       {errorNotification && (
-        <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 max-w-lg w-full px-4 animate-fade-in pointer-events-auto">
+        <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-[70] max-w-lg w-full px-4 animate-fade-in pointer-events-auto">
           <div className="bg-rose-50 border border-rose-300 text-rose-800 p-3.5 rounded-2xl shadow-retro flex items-start justify-between gap-3 text-xs">
             <div className="flex items-start gap-2 max-h-56 overflow-y-auto pr-1">
               <span className="text-base flex-shrink-0 mt-0.5">⚠️</span>

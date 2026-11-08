@@ -10,7 +10,7 @@ export interface CanvasExportParams {
 
 /**
  * Renders the full canvas stage (paper, dot grid, strokes, stickers, and notes)
- * to a high-resolution PNG data URL for Gemini Flash multimodal inference.
+ * to an optimized JPEG data URL for Gemini Flash multimodal inference.
  */
 export async function renderCanvasSnapshot({
   container,
@@ -31,7 +31,7 @@ export async function renderCanvasSnapshot({
 
   const rect = container.getBoundingClientRect();
   const exportCanvas = document.createElement('canvas');
-  const dpr = 2; // High-res export for Gemini Flash
+  const dpr = 1.5; // Balanced DPR for fast export & low token overhead
   exportCanvas.width = rect.width * dpr;
   exportCanvas.height = rect.height * dpr;
   const ctx = exportCanvas.getContext('2d');
@@ -218,10 +218,10 @@ export async function renderCanvasSnapshot({
 
   try {
     drawAll(true);
-    return exportCanvas.toDataURL('image/png');
+    return exportCanvas.toDataURL('image/jpeg', 0.85);
   } catch (taintErr) {
     console.warn('Canvas export tainted by external photo CORS; re-exporting with polaroid placeholders to preserve notes and strokes.', taintErr);
     drawAll(false);
-    return exportCanvas.toDataURL('image/png');
+    return exportCanvas.toDataURL('image/jpeg', 0.85);
   }
 }

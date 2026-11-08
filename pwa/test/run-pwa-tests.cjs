@@ -105,15 +105,21 @@ async function runTestSuite() {
     assert.match(exportContent, /setTimeout\(\(\) => resolve\(false\),\s*5000\)/, 'Must bound image preload to 5 seconds');
   });
 
+  await test('Canvas export optimizes snapshot with balanced DPR (1.5) and compressed JPEG (0.85)', () => {
+    assert.match(exportContent, /dpr\s*=\s*1\.5/, 'Must use balanced DPR 1.5');
+    assert.match(exportContent, /toDataURL\('image\/jpeg',\s*0\.85\)/, 'Must export as image/jpeg at 0.85 quality');
+  });
+
   // 4. Client Networking & Error Handling Contracts
   console.log('\n--- 4. Client Networking & Timeout Transformation Contracts ---');
 
   const clientContent = fs.readFileSync(path.join(pwaDir, 'src', 'services', 'workerClient.ts'), 'utf8');
 
-  await test('workerClient transforms AbortError into friendly timeout messages for generate and publish', () => {
+  await test('workerClient transforms AbortError into friendly timeout messages for generate, publish, and assist', () => {
     assert.match(clientContent, /AbortError/, 'Must catch AbortError');
-    assert.match(clientContent, /Generation timed out after 60 seconds/, 'Friendly message for generate');
+    assert.match(clientContent, /Generation timed out after 90 seconds/, 'Friendly message for generate');
     assert.match(clientContent, /Publishing timed out after 30 seconds/, 'Friendly message for publish');
+    assert.match(clientContent, /Nerd Assist timed out after 25 seconds/, 'Friendly message for assist');
   });
 
   await test('workerClient never triggers fake success on server error responses (401, 403, 429)', () => {
@@ -166,6 +172,20 @@ async function runTestSuite() {
     assert.match(appContent, /max-w-\[430px\]/, 'App must constrain canvas container to mobile-first phone width');
     assert.match(previewModalContent, /max-w-\[390px\]/, 'PreviewModal must render iframe in mobile-first frame');
     assert.strictEqual(previewModalContent.includes('setViewport'), false, 'PreviewModal must not provide desktop/tablet viewport switchers');
+  });
+
+  await test('App implements isBusyRef mutex to prevent overlapping generation calls and keeps isAssisting active', () => {
+    assert.match(appContent, /isBusyRef\s*=\s*useRef\(false\)/, 'App must define isBusyRef mutex');
+    assert.match(appContent, /if\s*\(isBusyRef\.current\s*&&\s*!overrideItems\)\s*return/, 'handleVibecode must check mutex lock');
+    assert.match(appContent, /if\s*\(isBusyRef\.current\)\s*return/, 'handleRunNerdAssist must check mutex lock');
+    assert.match(appContent, /setIsPreviewModalOpen\(false\)/, 'Must close PreviewModal when isGenerating begins');
+    assert.match(appContent, /Server is currently busy\. Please try again in a few moments\./, 'Must handle busy server error gracefully');
+  });
+
+  await test('PreviewModal has higher z-index (z-[60]) than generation loading modal (z-50) and error toast uses z-[70]', () => {
+    assert.match(previewModalContent, /z-\[60\]/, 'PreviewModal must have z-[60]');
+    assert.match(appContent, /z-50/, 'Loading modal must use z-50');
+    assert.match(appContent, /z-\[70\]/, 'Error notification toast must use z-[70] to stay above modal');
   });
 
   // 6. Photo Upload Pre-Flight Validation & On-Device Optimization Contracts

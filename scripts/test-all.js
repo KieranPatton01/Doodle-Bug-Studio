@@ -237,10 +237,13 @@ check('Worker comprehensive unit & contract test suite passes all tests', () => 
   assert.match(testOutput, /TEST RESULTS: \d+\/\d+ PASSED \(0 FAILED\)/, 'All worker tests must pass');
 });
 
-check('Gemini configuration keeps gemini-3.8-flash as primary and thinkingLevel is uppercase LOW', () => {
+check('Gemini configuration keeps gemini-3.8-flash as single model with fallback models removed', () => {
   const geminiSrc = fs.readFileSync(path.join(__dirname, '..', 'worker', 'src', 'gemini.ts'), 'utf8');
   assert.match(geminiSrc, /PRIMARY_MODEL = 'gemini-3\.8-flash'/, 'Primary model must be gemini-3.8-flash');
   assert.match(geminiSrc, /thinkingLevel:\s*'LOW'/, 'thinkingLevel must be uppercase LOW');
+  assert.strictEqual(geminiSrc.includes('FALLBACK_MODELS'), false, 'FALLBACK_MODELS must be removed');
+  assert.strictEqual(geminiSrc.includes('gemini-3-flash-preview'), false, 'gemini-3-flash-preview must be removed');
+  assert.strictEqual(geminiSrc.includes('gemini-2.5-flash'), false, 'gemini-2.5-flash must be removed');
   assert.strictEqual(geminiSrc.includes('gemini-1.5-flash'), false, 'gemini-1.5-flash must be removed');
   assert.strictEqual(geminiSrc.includes('gemini-2.0-flash'), false, 'gemini-2.0-flash must be removed');
 });

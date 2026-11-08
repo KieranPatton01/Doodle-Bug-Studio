@@ -62,7 +62,7 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-2 sm:p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
       <div className="bg-white rounded-3xl border border-stone-200 shadow-2xl max-w-4xl w-full h-[92vh] flex flex-col overflow-hidden">
         
         {/* Modal Top Bar */}

@@ -68,7 +68,7 @@ export async function callGenerateApi(params: GenerateParams): Promise<GenerateR
   const url = `${baseUrl}/api/generate`;
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s timeout
+  const timeoutId = setTimeout(() => controller.abort(), 90000); // 90s timeout
 
   let response: Response;
   try {
@@ -88,7 +88,7 @@ export async function callGenerateApi(params: GenerateParams): Promise<GenerateR
   } catch (networkErr) {
     clearTimeout(timeoutId);
     if (networkErr instanceof Error && (networkErr.name === 'AbortError' || networkErr.message.includes('aborted'))) {
-      throw new Error('Generation timed out after 60 seconds. Your nerd took a little too long building this. Please try again.');
+      throw new Error('Generation timed out after 90 seconds. Your nerd took a little too long building this. Please try again.');
     }
     throw networkErr;
   }
@@ -307,13 +307,25 @@ export async function callAssistApi(params: AssistApiParams): Promise<AssistApiR
         height: params.height,
       }),
     });
-  } finally {
+  } catch (networkErr) {
     clearTimeout(timeoutId);
+    if (networkErr instanceof Error && (networkErr.name === 'AbortError' || networkErr.message.includes('aborted'))) {
+      throw new Error('Nerd Assist timed out after 25 seconds. Please try again.');
+    }
+    throw networkErr;
   }
 
+  clearTimeout(timeoutId);
+
   if (!response.ok) {
-    const errText = await response.text().catch(() => response.statusText);
-    throw new Error(`[HTTP ${response.status}] ${errText}`);
+    let errorDetail = '';
+    try {
+      const errorData = (await response.json()) as { error?: string; message?: string };
+      errorDetail = errorData.error || errorData.message || response.statusText;
+    } catch {
+      errorDetail = await response.text().catch(() => response.statusText);
+    }
+    throw new Error(`[HTTP ${response.status}] ${errorDetail || 'Server error'}`);
   }
 
   return (await response.json()) as AssistApiResponse;

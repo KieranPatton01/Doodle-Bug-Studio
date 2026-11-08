@@ -23,7 +23,7 @@ execSync(
 console.log('✅ Compilation successful. Testing real compiled modules from dist-test/.\n');
 
 const { verifyFirebaseToken, setCachedJwks } = require('../dist-test/auth.js');
-const { buildGeminiPrompt, sanitizeHtmlResponse, generateCanvasFromDoodle } = require('../dist-test/gemini.js');
+const { buildGeminiPrompt, sanitizeHtmlResponse, generateCanvasFromDoodle, generateCanvasAssistPlan } = require('../dist-test/gemini.js');
 const {
   getGitHubConfig,
   utf8ToBase64,
@@ -445,6 +445,119 @@ async function runAllTests() {
           snapshotBase64: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
         }, testEnv);
       }, /max token limit/i);
+    } finally {
+      global.fetch = origFetch;
+    }
+  });
+
+  await test('generateCanvasFromDoodle throws clean busy server error on 503, 429, or RESOURCE_EXHAUSTED without fallback models', async () => {
+    const origFetch = global.fetch;
+    let callCount = 0;
+    global.fetch = async () => {
+      callCount++;
+      return new Response(JSON.stringify({
+        error: { code: 503, message: 'The model is overloaded. Please try again later.', status: 'UNAVAILABLE' }
+      }), { status: 503, headers: { 'Content-Type': 'application/json' } });
+    };
+
+    try {
+      await assert.rejects(async () => {
+        await generateCanvasFromDoodle({
+          snapshotBase64: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+        }, testEnv);
+      }, (err) => {
+        assert.strictEqual(err.message, 'Server is currently busy. Please try again in a few moments.');
+        return true;
+      });
+      // Verify no fallback models were attempted (exactly 1 call)
+      assert.strictEqual(callCount, 1, 'Must not attempt fallback models');
+    } finally {
+      global.fetch = origFetch;
+    }
+  });
+
+  await test('POST /api/generate returns HTTP 503 with clean busy message when Gemini is overloaded', async () => {
+    const origFetch = global.fetch;
+    global.fetch = async () => {
+      return new Response(JSON.stringify({
+        error: { code: 429, message: 'Resource has been exhausted (e.g. check quota).', status: 'RESOURCE_EXHAUSTED' }
+      }), { status: 429, headers: { 'Content-Type': 'application/json' } });
+    };
+
+    try {
+      const devEnv = { ...testEnv, DEV_BYPASS_AUTH: 'true' };
+      const req = new Request('https://worker.test/api/generate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer mock-token-uid-gf-authorized-uid-12345',
+        },
+        body: JSON.stringify({
+          snapshotBase64: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+        }),
+      });
+      const res = await workerDefault.fetch(req, devEnv);
+      assert.strictEqual(res.status, 503);
+      const data = await res.json();
+      assert.strictEqual(data.error, 'Server is currently busy. Please try again in a few moments.');
+    } finally {
+      global.fetch = origFetch;
+    }
+  });
+
+  await test('generateCanvasAssistPlan throws clean busy server error on 503 or 429 without fallback models', async () => {
+    const origFetch = global.fetch;
+    let callCount = 0;
+    global.fetch = async () => {
+      callCount++;
+      return new Response(JSON.stringify({
+        error: { code: 503, message: 'The model is overloaded. Please try again later.', status: 'UNAVAILABLE' }
+      }), { status: 503, headers: { 'Content-Type': 'application/json' } });
+    };
+
+    try {
+      await assert.rejects(async () => {
+        await generateCanvasAssistPlan({
+          prompt: 'ragebait website for stinky gf',
+          width: 390,
+          height: 600,
+        }, testEnv);
+      }, (err) => {
+        assert.strictEqual(err.message, 'Server is currently busy. Please try again in a few moments.');
+        return true;
+      });
+      assert.strictEqual(callCount, 1, 'Must not attempt fallback models');
+    } finally {
+      global.fetch = origFetch;
+    }
+  });
+
+  await test('POST /api/assist returns HTTP 503 with clean busy message when Gemini is overloaded', async () => {
+    const origFetch = global.fetch;
+    global.fetch = async () => {
+      return new Response(JSON.stringify({
+        error: { code: 503, message: 'The model is overloaded. Please try again later.', status: 'UNAVAILABLE' }
+      }), { status: 503, headers: { 'Content-Type': 'application/json' } });
+    };
+
+    try {
+      const devEnv = { ...testEnv, DEV_BYPASS_AUTH: 'true' };
+      const req = new Request('https://worker.test/api/assist', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer mock-token-uid-gf-authorized-uid-12345',
+        },
+        body: JSON.stringify({
+          prompt: 'ragebait website for stinky gf',
+          width: 390,
+          height: 600,
+        }),
+      });
+      const res = await workerDefault.fetch(req, devEnv);
+      assert.strictEqual(res.status, 503);
+      const data = await res.json();
+      assert.strictEqual(data.error, 'Server is currently busy. Please try again in a few moments.');
     } finally {
       global.fetch = origFetch;
     }
