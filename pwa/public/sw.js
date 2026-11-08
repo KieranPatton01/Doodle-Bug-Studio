@@ -1,11 +1,11 @@
 // Doodlebug PWA Service Worker - Resilient Offline & Update Strategy
-const CACHE_NAME = 'doodlebug-v2';
+const CACHE_NAME = 'doodlebug-v3';
 const MAX_CACHED_ASSETS = 35; // Cap cached assets so old hashed bundles do not accumulate indefinitely
 const PRECACHE_ASSETS = [
-  '/',
-  '/index.html',
-  '/manifest.json',
-  '/favicon.svg'
+  './',
+  './index.html',
+  './manifest.json',
+  './favicon.svg'
 ];
 
 async function trimCache(cacheName, maxItems, newRequestUrl) {
@@ -90,7 +90,7 @@ self.addEventListener('fetch', (event) => {
           }
           return networkResponse;
         })
-        .catch(() => caches.match(event.request).then((cached) => cached || caches.match('/index.html')))
+        .catch(() => caches.match(event.request).then((cached) => cached || caches.match('./index.html') || caches.match('/index.html')))
     );
     return;
   }
