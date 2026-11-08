@@ -1,7 +1,7 @@
 // Doodlebug Live Site Service Worker
 // Strict network-first (bypassing browser HTTP disk cache) for HTML & live updates
 
-const CACHE_NAME = 'doodlebug-live-v2';
+const CACHE_NAME = 'doodlebug-live-v3';
 const SHELL_ASSETS = [
   './',
   './index.html',

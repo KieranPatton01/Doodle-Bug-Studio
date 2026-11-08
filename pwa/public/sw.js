@@ -1,5 +1,5 @@
 // Doodlebug PWA Service Worker - Resilient Offline & Update Strategy
-const CACHE_NAME = 'doodlebug-v3';
+const CACHE_NAME = 'doodlebug-v4';
 const MAX_CACHED_ASSETS = 35; // Cap cached assets so old hashed bundles do not accumulate indefinitely
 const PRECACHE_ASSETS = [
   './',

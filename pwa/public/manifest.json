@@ -1,7 +1,7 @@
 {
   "id": "doodlebug-studio-pwa",
   "name": "Doodlebug Studio",
-  "short_name": "Studio",
+  "short_name": "Doodlebug Studio",
   "description": "Draw, decorate, and build your live personal website 🎨🐛",
   "start_url": "./",
   "scope": "./",

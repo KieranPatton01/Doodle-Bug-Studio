@@ -1,8 +1,10 @@
 {
-  "name": "Doodlebug Live",
-  "short_name": "My Site",
+  "id": "islacowper-live-pwa",
+  "name": "islacowper.co.uk",
+  "short_name": "islacowper.co.uk",
   "description": "My personal website created with Doodlebug ✨",
   "start_url": "./",
+  "scope": "./",
   "display": "standalone",
   "background_color": "#FFFDF5",
   "theme_color": "#FFFDF5",
